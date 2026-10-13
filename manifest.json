@@ -3,7 +3,6 @@
     "loading_order": 120,
     "requires": [],
     "optional": [],
-    "dependencies": ["memory-graph"],
     "js": "index.js",
     "css": "style.css",
     "author": "xzhouzhou758",
