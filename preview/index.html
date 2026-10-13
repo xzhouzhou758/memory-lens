@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Memory Lens · Preview</title>
+    <link rel="stylesheet" href="../style.css">
+    <style>
+        html, body { margin: 0; height: 100%; background: #0d0e11; }
+    </style>
+</head>
+<body>
+    <script type="module">
+        import { mountMemoryLens } from '../src/app.js';
+        import { createMockSnapshot, createLargeSnapshot } from './mock-data.js';
+
+        const params = new URLSearchParams(location.search);
+        const scenario = params.get('data') || 'demo';
+        if (params.get('theme')) localStorage.setItem('memoryLens.prefs.v1', JSON.stringify({ ...JSON.parse(localStorage.getItem('memoryLens.prefs.v1') || '{}'), theme: params.get('theme') }));
+
+        const source = {
+            kind: 'mock',
+            locale: () => params.get('lang') || 'zh-CN',
+            async load() {
+                await new Promise(r => setTimeout(r, 120));
+                if (scenario === 'error') throw Object.assign(new Error('mock'), { code: 'no-extension' });
+                if (scenario === 'empty') return { chatKey: 'empty', chatLabel: '新聊天', nodes: [], edges: [], injection: null, lastRecall: null };
+                return scenario === 'large' ? createLargeSnapshot(Number(params.get('n') || 600)) : createMockSnapshot();
+            },
+            subscribe() { return () => {}; },
+        };
+        window.__lens = mountMemoryLens({
+            source,
+            cytoscapeSrc: params.get('cy') || '/lib/cytoscape.min.js',
+            onClose: () => { document.body.append(Object.assign(document.createElement('p'), { textContent: 'closed', style: 'color:#888;font:14px system-ui;padding:20px' })); },
+        });
+    </script>
+</body>
+</html>

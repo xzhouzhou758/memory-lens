@@ -1,0 +1,46 @@
+/* Command palette + dialog */
+.mlens .ml-palette-backdrop, .mlens .ml-dialog-backdrop {
+    position: absolute; inset: 0; z-index: 20;
+    display: flex; justify-content: center; align-items: flex-start;
+    padding: min(14vh, 120px) 16px 16px;
+    background: var(--ml-scrim);
+    animation: ml-fade 140ms ease-out;
+}
+@keyframes ml-fade { from { opacity: 0; } }
+@keyframes ml-pop { from { opacity: 0; transform: translateY(-6px) scale(0.985); } }
+
+.mlens .ml-palette {
+    display: flex; flex-direction: column; width: min(640px, 100%); max-height: min(560px, 76vh);
+    border-radius: var(--ml-radius-lg); background: var(--ml-raised); box-shadow: var(--ml-shadow-3);
+    overflow: hidden; animation: ml-pop 160ms var(--ml-ease);
+}
+.mlens .ml-palette-field { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 52px; border-bottom: 1px solid var(--ml-border); color: var(--ml-text-faint); }
+.mlens .ml-palette-input {
+    flex: 1; min-width: 0; height: 100%; margin: 0; padding: 0; border: 0; outline: none; box-shadow: none;
+    background: transparent; color: var(--ml-text); font: inherit; font-size: 15px;
+}
+.mlens .ml-palette-input::placeholder { color: var(--ml-text-faint); }
+.mlens .ml-palette-list { flex: 1 1 auto; overflow-y: auto; padding: 6px; }
+.mlens .ml-palette-group { padding: 10px 10px 4px; font-size: 11px; font-weight: 600; color: var(--ml-text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+.mlens .ml-palette-item {
+    display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 10px;
+    border-radius: var(--ml-radius-sm); cursor: pointer;
+}
+.mlens .ml-palette-item[aria-selected="true"] { background: var(--ml-active); }
+.mlens .ml-palette-icon { display: grid; place-items: center; width: 20px; flex: none; color: var(--ml-text-muted); }
+.mlens .ml-palette-main { display: grid; flex: 1; min-width: 0; }
+.mlens .ml-palette-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+.mlens .ml-palette-snippet { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ml-text-faint); }
+.mlens .ml-palette-meta { flex: none; font-size: 11.5px; color: var(--ml-text-faint); white-space: nowrap; }
+.mlens .ml-palette-empty { padding: 28px; text-align: center; color: var(--ml-text-faint); }
+.mlens .ml-palette-foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--ml-border); background: var(--ml-surface-2); }
+
+.mlens .ml-dialog {
+    display: flex; flex-direction: column; width: min(760px, 100%); max-height: 80vh;
+    border-radius: var(--ml-radius-lg); background: var(--ml-raised); box-shadow: var(--ml-shadow-3);
+    overflow: hidden; outline: none; animation: ml-pop 160ms var(--ml-ease);
+}
+.mlens .ml-dialog-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--ml-border); }
+.mlens .ml-dialog-title { flex: 1; font-size: 14px; }
+.mlens .ml-dialog-body { display: grid; gap: 18px; padding: 16px 18px 20px; overflow: auto; }
+.mlens .ml-dialog-section .ml-section-title { margin-bottom: 6px; }
