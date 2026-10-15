@@ -5,7 +5,7 @@
 
 import { h, clear, truncate, prefersReducedMotion, put } from '../util.js';
 import { icon } from '../icons.js';
-import { t, typeLabel, relationLabel } from '../i18n.js';
+import { t, typeLabel, relationLabel, depthLabel } from '../i18n.js';
 import { visibleSubgraph, contextState, typeVisual, isDefaultFilters } from '../model.js';
 import { loadCytoscape } from '../graph/cy-loader.js';
 import { forceLayout, chronoLayout, nodeRadius } from '../graph/layout.js';
@@ -95,7 +95,7 @@ export function createGraphView(app) {
         if (!data) return;
         clear(tooltip);
         put(tooltip, 
-            h('div', { class: 'ml-graph-tip-head' }, typeDot(data.type, { size: 8 }), h('span', { text: typeLabel(data.type) }), data.isRollup ? h('span', { class: 'ml-graph-tip-tag', text: t('depthTag', data.depth) }) : null),
+            h('div', { class: 'ml-graph-tip-head' }, typeDot(data.type, { size: 8 }), h('span', { text: typeLabel(data.type) }), data.isRollup ? h('span', { class: 'ml-graph-tip-tag', text: depthLabel(data.depth) }) : null),
             h('div', { class: 'ml-graph-tip-title', text: truncate(data.title, 60) }),
         );
         const pos = node.renderedPosition();

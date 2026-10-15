@@ -6,7 +6,7 @@
 
 import { h, clear, copyText, put } from '../util.js';
 import { icon } from '../icons.js';
-import { t, typeLabel, relationLabel, fieldLabel } from '../i18n.js';
+import { t, typeLabel, relationLabel, fieldLabel, depthLabel } from '../i18n.js';
 import { neighborsOf, entitiesOfEvent, contextState, formatFloor, fieldText, compareTimeline, typeVisual } from '../model.js';
 import { iconButton, nodeLink, contextBadge, sectionTitle, typeChip, emptyState, button } from '../ui/components.js';
 
@@ -61,7 +61,7 @@ export function createInspector(app) {
             (parent || children.length)
                 ? block(t('hierarchy'),
                     parent ? h('div', { class: 'ml-insp-sub', text: t('parent') }) : null,
-                    parent ? nodeLink(parent, select, { meta: t('depthTag', parent.depth) }) : null,
+                    parent ? nodeLink(parent, select, { meta: depthLabel(parent.depth) }) : null,
                     children.length ? h('div', { class: 'ml-insp-sub', text: `${t('children')} · ${children.length}` }) : null,
                     children.length ? h('div', { class: 'ml-insp-children' }, children.map(child => nodeLink(child, select, { meta: formatFloor(child) }))) : null)
                 : null,
@@ -86,7 +86,7 @@ export function createInspector(app) {
         events.sort(compareTimeline);
         const fieldList = keys.length
             ? h('dl', { class: 'ml-insp-fields' }, keys.map(key => [
-                h('dt', { text: fieldLabel(key) }),
+                h('dt', { text: fieldLabel(key, node.type) }),
                 h('dd', { text: fieldText(node.fields[key]) }),
             ]))
             : null;
@@ -155,7 +155,7 @@ export function createInspector(app) {
                     if (prev) select(prev);
                 }, { className: 'ml-iconbtn-sm' }) : null,
                 typeChip(node.type),
-                node.isRollup ? h('span', { class: 'ml-tl-tag', text: t('depthTag', node.depth) }) : null,
+                node.isRollup ? h('span', { class: 'ml-tl-tag', text: depthLabel(node.depth) }) : null,
                 node.archived ? h('span', { class: 'ml-tag-muted', text: t('archived') }) : null,
                 h('span', { class: 'ml-spacer' }),
                 iconButton('crosshair', t('locate'), () => app.locate(node.id), { className: 'ml-iconbtn-sm' }),

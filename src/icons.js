@@ -46,6 +46,14 @@ const PATHS = {
     target: `${circle(12, 12, 8.5)}${circle(12, 12, 4.5)}${circle(12, 12, 0.8)}`,
     eye: `M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z${circle(12, 12, 3)}`,
     lens: `${circle(9, 12, 6.2)}${circle(15, 12, 6.2)}`,
+    blocks: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+    grip: `${circle(9, 6, 1)}${circle(15, 6, 1)}${circle(9, 12, 1)}${circle(15, 12, 1)}${circle(9, 18, 1)}${circle(15, 18, 1)}`,
+    trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+    undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3',
+    check: 'M5 12.5l4.5 4.5L19 7.5',
+    arrowUp: 'M12 19V5M6 11l6-6 6 6',
+    arrowDown: 'M12 5v14M6 13l6 6 6-6',
+    alert: `${circle(12, 12, 9)}M12 7.5v5.5M12 16.5v.01`,
 };
 
 export function icon(name, { size = 16, className = '', label = '' } = {}) {

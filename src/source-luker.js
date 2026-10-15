@@ -36,6 +36,7 @@ async function loadInternals() {
         ]).then(([main, read]) => ({
             ensureStoreSyncedWithChat: main.ensureStoreSyncedWithChat,
             ensureMemoryStoreLoaded: main.ensureMemoryStoreLoaded,
+            getSettings: main.getSettings,
             getMemoryGraphReadApi: read.getMemoryGraphReadApi,
         })).catch((err) => {
             internalModules = null;
@@ -88,8 +89,18 @@ export function createLukerSource() {
             const read = internals.getMemoryGraphReadApi(store, ctx);
             const nodes = read.listNodes({ activeOnly: false });
             const edges = read.listEdges({});
+            // Full schema (labels + column hints) for display names; the
+            // read-api view omits those. Fall back to the read-api view.
             let schema = null;
-            try { schema = read.getSchema(); } catch { schema = null; }
+            try {
+                const info = mg.getSchemaScopeInfo?.(ctx, internals.getSettings?.());
+                if (Array.isArray(info?.schema)) schema = { types: structuredClone(info.schema) };
+            } catch { schema = null; }
+            if (!schema) {
+                try { schema = read.getSchema(); } catch { schema = null; }
+            }
+            let columnLabels = {};
+            try { columnLabels = structuredClone(ctx.extensionSettings?.[LABEL_KEY]?.columnLabels || {}); } catch { columnLabels = {}; }
             let injection = null;
             try { injection = mg.getCurrentInjection?.(ctx) || read.getInjectionState?.(); } catch { injection = null; }
             let lastRecall = null;
@@ -101,6 +112,7 @@ export function createLukerSource() {
                 nodes,
                 edges,
                 schema,
+                columnLabels,
                 injection,
                 lastRecall,
             };
@@ -147,6 +159,132 @@ export function createLukerSource() {
             if (!button) return false;
             button.click();
             return true;
+        },
+
+        schema: createSchemaAccess(resolveApi),
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Memory structure (node-type schema) read / write
+// ---------------------------------------------------------------------------
+//
+// Mirrors memory-graph's own schema editor: global = settings.nodeTypeSchema
+// + saveSettings(); per character = the registered persistCharacterSchemaOverride.
+// Everything goes through memory-graph's normalizeNodeTypeSchema first, so the
+// stored shape is exactly what the native editor would have written.
+
+const LABEL_KEY = 'memory_lens';
+
+function createSchemaAccess(resolveApi) {
+    let mainModule = null;
+    const loadMain = async () => {
+        if (!mainModule) {
+            mainModule = import(`${MG_BASE}/main.js`).catch((err) => {
+                mainModule = null;
+                throw new SourceError('api', String(err?.message || err));
+            });
+        }
+        return mainModule;
+    };
+
+    const labelStore = (ctx) => {
+        const all = ctx.extensionSettings || {};
+        all[LABEL_KEY] ||= {};
+        all[LABEL_KEY].columnLabels ||= {};
+        return all[LABEL_KEY].columnLabels;
+    };
+
+    return {
+        async read() {
+            const { ctx, api: mg } = resolveApi();
+            const main = await loadMain();
+            if (typeof main.getSettings !== 'function' || typeof main.normalizeNodeTypeSchema !== 'function' || typeof mg.getSchemaScopeInfo !== 'function') {
+                throw new SourceError('schema-unsupported');
+            }
+            const settings = main.getSettings();
+            const info = mg.getSchemaScopeInfo(ctx, settings);
+            return {
+                scope: info.hasOverride ? 'character' : 'global',
+                hasCharacter: Boolean(info.hasAvatar),
+                characterName: info.characterName || '',
+                types: structuredClone(main.normalizeNodeTypeSchema(info.schema)),
+                defaults: structuredClone(main.normalizeNodeTypeSchema(main.getDefaultNodeTypeSchema?.() || null)),
+                labels: structuredClone(labelStore(ctx)),
+            };
+        },
+
+        /**
+         * @param {object[]} types full type list
+         * @param {{ scope: 'global'|'character', labels?: object }} options
+         * @returns the previous stored state, for undo
+         */
+        async write(types, { scope, labels = null }) {
+            const { ctx, api: mg } = resolveApi();
+            const main = await loadMain();
+            const settings = main.getSettings();
+            const normalized = main.normalizeNodeTypeSchema(types);
+            const info = mg.getSchemaScopeInfo(ctx, settings);
+            const previous = {
+                scope: info.hasOverride ? 'character' : 'global',
+                globalTypes: structuredClone(settings.nodeTypeSchema ?? null),
+                characterTypes: info.hasOverride ? structuredClone(info.schema) : null,
+                labels: structuredClone(labelStore(ctx)),
+            };
+            if (scope === 'character') {
+                if (!info.hasAvatar) throw new SourceError('no-character');
+                const ok = await mg.persistCharacterSchemaOverride(ctx, info.avatar, normalized);
+                if (!ok) throw new SourceError('write-failed');
+            } else {
+                settings.nodeTypeSchema = normalized;
+                if (info.hasOverride) {
+                    // Saving "for everyone" while a character override exists
+                    // would otherwise be shadowed by that override.
+                    await mg.removeCharacterSchemaOverride?.(ctx, info.avatar);
+                }
+            }
+            if (labels) {
+                const store = labelStore(ctx);
+                for (const key of Object.keys(store)) delete store[key];
+                Object.assign(store, labels);
+            }
+            await (ctx.saveSettings ? ctx.saveSettings() : ctx.saveSettingsDebounced?.());
+            return previous;
+        },
+
+        /** Restores a snapshot returned by write(). */
+        async restore(previous) {
+            const { ctx, api: mg } = resolveApi();
+            const main = await loadMain();
+            const settings = main.getSettings();
+            const info = mg.getSchemaScopeInfo(ctx, settings);
+            settings.nodeTypeSchema = previous.globalTypes ?? settings.nodeTypeSchema;
+            if (previous.characterTypes && info.hasAvatar) {
+                await mg.persistCharacterSchemaOverride(ctx, info.avatar, previous.characterTypes);
+            } else if (!previous.characterTypes && info.hasOverride) {
+                await mg.removeCharacterSchemaOverride?.(ctx, info.avatar);
+            }
+            const store = labelStore(ctx);
+            for (const key of Object.keys(store)) delete store[key];
+            Object.assign(store, previous.labels || {});
+            await (ctx.saveSettings ? ctx.saveSettings() : ctx.saveSettingsDebounced?.());
+        },
+
+        async clearCharacter() {
+            const { ctx, api: mg } = resolveApi();
+            const main = await loadMain();
+            const info = mg.getSchemaScopeInfo(ctx, main.getSettings());
+            if (!info.hasAvatar) return false;
+            return Boolean(await mg.removeCharacterSchemaOverride?.(ctx, info.avatar));
+        },
+
+        labels() {
+            try {
+                const { ctx } = resolveApi();
+                return structuredClone(labelStore(ctx));
+            } catch {
+                return {};
+            }
         },
     };
 }

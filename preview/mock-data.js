@@ -142,14 +142,7 @@ export function createMockSnapshot() {
         loadedAt: Date.now(),
         nodes: structuredClone(nodes),
         edges: structuredClone(edges),
-        schema: {
-            types: [
-                { type: 'event', tableColumns: ['summary'] },
-                { type: 'character_sheet', tableColumns: ['title', 'aliases', 'traits', 'identity', 'goal', 'inventory', 'language_sample', 'addressing_user'] },
-                { type: 'location_state', tableColumns: ['title', 'aliases', 'controller', 'danger', 'resources', 'state'] },
-                { type: 'thread', tableColumns: ['title', 'status', 'note'] },
-            ],
-        },
+        schema: { types: createMockSchema() },
         injection: {
             alwaysInjectIds: ['t_log', 't_sick', 't_debt', 'r2_a'],
             recallSelectedIds: ['e13', 'e14', 'e16', 'c_lin', 'c_shen', 'l_tower'],
@@ -162,6 +155,132 @@ export function createMockSnapshot() {
                 focusPacket: '<memory_focus>\n[event] 顾长庚坦白 (#49–52)\n[event] 潜入商会 (#53–56)\n[event] 灯塔重新点亮 (#61–64)\n[character] 林栖 / 沈既白\n[location] 第七灯塔\n</memory_focus>',
             },
         },
+    };
+}
+
+/** Full type specs as memory-graph stores them (long English defaults included). */
+export function createMockSchema() {
+    const hints = {
+        event: { summary: 'A prose body describing the event skeleton in chronological order, including the cause and the resulting change to the situation.' },
+        character_sheet: {
+            title: 'Canonical character name only. Do not include aliases, English names, titles or translations.',
+            aliases: 'Nicknames, titles and how other characters address this person. Comma separated.',
+            traits: 'Stable personality traits and habits that persist across scenes.',
+            identity: 'Long-term identity and social role in the world.',
+            goal: 'Long-term goals that drive the character across scenes.',
+            inventory: 'Important items the character carries or owns.',
+            language_sample: 'A short sample of the character voice, in their own words.',
+            addressing_user: 'How this character addresses the user.',
+        },
+        location_state: {
+            title: 'Place name as it appears in the story.',
+            aliases: 'Other names for the same place.',
+            controller: 'Who currently controls or occupies this place.',
+            danger: 'Current danger level and its source.',
+            resources: 'Notable resources available here.',
+            state: 'Current physical and social state of the place.',
+        },
+        thread: {
+            title: 'Short, self-identifying thread name. No 「主线」/「支线」 prefix.',
+            status: 'active | resolved | stalled',
+            note: 'What the thread is about and what would resolve it.',
+        },
+    };
+    const make = (id, label, columns, extra = {}) => ({
+        id,
+        label,
+        tableName: `${id}_table`,
+        tableColumns: columns,
+        embeddingColumns: columns.slice(),
+        level: 'semantic',
+        extractHint: DEFAULT_INTROS[id] || '',
+        extractionInstructions: `${label} extraction rules …`.repeat(6),
+        extractEveryN: 1,
+        keywords: [],
+        columnHints: hints[id] || {},
+        requiredColumns: id === 'event' ? ['summary'] : ['title'],
+        forceUpdate: id === 'event',
+        editable: id !== 'event',
+        alwaysInject: id === 'thread',
+        latestOnly: id !== 'event',
+        primaryKeyColumns: id === 'event' ? [] : ['title'],
+        ragPerTypeK: 0,
+        recordsFloorRange: false,
+        compression: id === 'event'
+            ? { mode: 'hierarchical', threshold: 6, fanIn: 3, maxDepth: 6, keepRecentLeaves: 3, rule: '', summarizeInstruction: 'Event summary writing rules …'.repeat(20) }
+            : { mode: 'none', threshold: 6, fanIn: 3, maxDepth: 6, keepRecentLeaves: 0, rule: '', summarizeInstruction: '' },
+        ...extra,
+    });
+    return [
+        make('event', 'Event', ['summary']),
+        make('character_sheet', 'Character Sheet', ['title', 'aliases', 'traits', 'identity', 'goal', 'inventory', 'language_sample', 'addressing_user']),
+        make('location_state', 'Location State', ['title', 'aliases', 'controller', 'danger', 'resources', 'state']),
+        make('thread', 'Thread', ['title', 'status', 'note']),
+        {
+            ...make('storyline', '剧情线', ['name', 'track', 'status', 'stage']),
+            columnHints: {
+                name: '剧情线名称，简短可指认，不带「主线」「支线」前缀本身（例如：神豪系统觉醒、横店剧组、刘家）',
+                track: '所属线索，取值 main 或 side',
+                status: 'active / resolved / stalled',
+                stage: '当前推进到哪一步，一句话',
+            },
+            requiredColumns: ['name', 'track', 'status'],
+            embeddingColumns: ['name', 'track', 'status'],
+            primaryKeyColumns: ['name'],
+            alwaysInject: true,
+            latestOnly: true,
+            extractHint: '追踪跨多个场景持续推进的剧情线。',
+        },
+    ];
+}
+
+const DEFAULT_INTROS = {
+    event: 'Critical plot events that change the situation and should be remembered verbatim.',
+    character_sheet: 'Stable character facts that remain true across scenes.',
+    location_state: 'The current state of a place the story returns to.',
+    thread: 'Open questions the story is still following.',
+};
+
+/** In-memory stand-in for memory-graph's schema read/write, for the preview. */
+export function createMockSchemaAccess() {
+    let types = createMockSchema();
+    let scope = 'global';
+    let characterTypes = null;
+    let labels = {};
+    return {
+        read: async () => ({
+            scope,
+            hasCharacter: true,
+            characterName: '雾港灯塔（示例）',
+            types: structuredClone(characterTypes || types),
+            defaults: createMockSchema(),
+            labels: structuredClone(labels),
+        }),
+        write: async (next, { scope: target, labels: nextLabels }) => {
+            const previous = {
+                scope,
+                globalTypes: structuredClone(types),
+                characterTypes: characterTypes ? structuredClone(characterTypes) : null,
+                labels: structuredClone(labels),
+            };
+            if (target === 'character') characterTypes = structuredClone(next);
+            else { types = structuredClone(next); characterTypes = null; }
+            scope = characterTypes ? 'character' : 'global';
+            if (nextLabels) labels = structuredClone(nextLabels);
+            return previous;
+        },
+        restore: async (previous) => {
+            types = structuredClone(previous.globalTypes || types);
+            characterTypes = previous.characterTypes ? structuredClone(previous.characterTypes) : null;
+            labels = structuredClone(previous.labels || {});
+            scope = characterTypes ? 'character' : 'global';
+        },
+        clearCharacter: async () => {
+            characterTypes = null;
+            scope = 'global';
+            return true;
+        },
+        labels: () => structuredClone(labels),
     };
 }
 

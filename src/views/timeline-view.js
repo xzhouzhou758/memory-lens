@@ -6,7 +6,7 @@
 
 import { h, clear, truncate, put } from '../util.js';
 import { icon } from '../icons.js';
-import { t } from '../i18n.js';
+import { t, depthLabel } from '../i18n.js';
 import { buildChapters, entitiesOfEvent, contextState, formatFloor, isDefaultFilters } from '../model.js';
 import { contextBadge, emptyState, nodeLink, segmented, button } from '../ui/components.js';
 
@@ -41,7 +41,7 @@ export function createTimelineView(app) {
         },
         h('div', { class: 'ml-tl-meta' },
             h('span', { class: 'ml-tl-floor', text: formatFloor(node) || '—' }),
-            node.isRollup ? h('span', { class: 'ml-tl-tag', text: t('depthTag', node.depth) }) : null,
+            node.isRollup ? h('span', { class: 'ml-tl-tag', text: depthLabel(node.depth) }) : null,
             parsed.time ? h('span', { class: 'ml-chip' }, icon('clock', { size: 12 }), h('span', { text: parsed.time })) : null,
             parsed.place ? h('span', { class: 'ml-chip' }, icon('mapPin', { size: 12 }), h('span', { text: parsed.place })) : null,
             h('span', { class: 'ml-spacer' }),
@@ -88,8 +88,8 @@ export function createTimelineView(app) {
         const focus = state.filters.focusEntityId ? model.nodes.get(state.filters.focusEntityId) : null;
         put(head, 
             segmented([
-                { value: 'asc', label: '↑', title: 'Oldest first' },
-                { value: 'desc', label: '↓', title: 'Newest first' },
+                { value: 'asc', label: t('sortOldest') },
+                { value: 'desc', label: t('sortNewest') },
             ], state.timelineOrder, (value) => app.setState({ timelineOrder: value }), { className: 'ml-seg-sm' }),
             focus
                 ? h('div', { class: 'ml-focuspill' },

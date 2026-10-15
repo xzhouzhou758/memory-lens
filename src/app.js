@@ -17,6 +17,9 @@ import { createInspector } from './panels/inspector.js';
 import { createPalette } from './panels/palette.js';
 import { createDialog } from './panels/dialog.js';
 import { iconButton, segmented, emptyState, button, kbd } from './ui/components.js';
+import { createSchemaView } from './schema/schema-view.js';
+import { buildLabelMaps } from './schema/schema-model.js';
+import { setDisplayLabels } from './i18n.js';
 
 const COMPACT_QUERY = '(max-width: 860px)';
 const ERROR_KEYS = { 'no-host': 'errNoHost', 'no-extension': 'errNoExtension', 'no-chat': 'errNoChat', api: 'errApi' };
@@ -35,7 +38,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
     const compactMql = globalThis.matchMedia?.(COMPACT_QUERY);
     const store = createStore({
         theme: prefs.theme === 'light' || prefs.theme === 'dark' ? prefs.theme : detectTheme(),
-        view: ['graph', 'timeline', 'table'].includes(prefs.view) ? prefs.view : 'graph',
+        view: ['graph', 'timeline', 'table', 'schema'].includes(prefs.view) ? prefs.view : 'graph',
         graphLayout: prefs.graphLayout === 'chrono' ? 'chrono' : 'force',
         timelineOrder: prefs.timelineOrder === 'desc' ? 'desc' : 'asc',
         sidebarOpen: prefs.sidebarOpen !== false,
@@ -113,7 +116,9 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
         graph: createGraphView(app),
         timeline: createTimelineView(app),
         table: createTableView(app),
+        schema: createSchemaView(app, source),
     };
+    const isFullView = (view) => view === 'schema';
     const sidebar = createSidebar(app);
     const inspector = createInspector(app);
     const palette = createPalette(app);
@@ -129,8 +134,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
             h('div', { class: 'ml-brand' },
                 h('span', { class: 'ml-brand-mark', 'aria-hidden': 'true' }, icon('lens', { size: 18 })),
                 h('span', { class: 'ml-brand-name', text: t('appName') }),
-                titleChat,
-                h('span', { class: 'ml-brand-badge', text: t('readOnly') }))),
+                titleChat)),
         viewSwitch,
         topbarRight);
 
@@ -149,6 +153,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
             { value: 'graph', label: t('viewGraph'), icon: 'graph' },
             { value: 'timeline', label: t('viewTimeline'), icon: 'timeline' },
             { value: 'table', label: t('viewTable'), icon: 'table' },
+            { value: 'schema', label: t('viewSchema'), icon: 'blocks' },
         ], state.view, (value) => store.set({ view: value }), { ariaLabel: t('display'), iconOnlyMobile: true }));
         put(clear(topbarRight), 
             h('button', { type: 'button', class: 'ml-searchbtn', onClick: () => palette.open(), 'aria-label': t('search') },
@@ -197,7 +202,10 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
         root.classList.toggle('sidebar-open', state.compact ? state.drawer === 'sidebar' : state.sidebarOpen);
         root.classList.toggle('inspector-open', state.compact ? state.drawer === 'inspector' : state.inspectorOpen);
         root.classList.toggle('drawer-open', state.compact && Boolean(state.drawer));
+        // The structure editor uses the full width (no filter sidebar / inspector).
+        root.classList.toggle('is-full-view', isFullView(state.view));
         for (const wrap of stage.children) wrap.hidden = wrap.dataset.view !== state.view;
+        renderState();
     }
 
     function renderState() {
@@ -215,6 +223,8 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
             put(stateLayer, emptyState('graph', t(ERROR_KEYS[code] || 'errGeneric'), code ? '' : String(state.error?.message || ''),
                 button(t('refresh'), () => load({ manual: true }), { iconName: 'refresh' })));
         }
+        // The structure editor works without an open chat: never cover it.
+        if (isFullView(state.view) && state.error?.code === 'no-chat') stateLayer.hidden = true;
     }
 
     function renderAll() {
@@ -224,7 +234,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
         renderState();
         sidebar.render();
         inspector.render();
-        if (model) views[store.get().view].render();
+        if (model || isFullView(store.get().view)) views[store.get().view].render();
     }
 
     // ----- Data -----------------------------------------------------------
@@ -236,6 +246,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
             const snapshot = await source.load();
             if (token !== loadToken || destroyed) return;
             const chatChanged = model && snapshot.chatKey !== model.chatKey;
+            setDisplayLabels(buildLabelMaps(snapshot.schema?.types, snapshot.columnLabels));
             model = buildModel(snapshot);
             for (const view of Object.values(views)) view.invalidate?.();
             const patch = { status: 'ready', error: null, syncing: false };
@@ -250,6 +261,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
             if (token !== loadToken || destroyed) return;
             console.warn('[memory-lens] load failed', err);
             model = null;
+            views.schema.invalidate?.();
             store.set({ status: 'error', error: { code: err?.code || '', message: String(err?.message || err) }, syncing: false });
             renderAll();
         }
@@ -269,7 +281,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
         }
         if (changed.has('view')) {
             const view = views[state.view];
-            if (model) view.render();
+            if (model && !isFullView(state.view)) view.render();
             view.onShow?.();
         }
         if (changed.has('graphLayout') || changed.has('timelineOrder')) {
@@ -309,6 +321,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
         if (event.key === 'Escape') {
             event.stopPropagation();
             if (dialog.isOpen()) dialog.close();
+            else if (isFullView(store.get().view) && views[store.get().view].onEscape?.()) { /* handled */ }
             else if (store.get().drawer) store.set({ drawer: '' });
             else if (store.get().matchIds) app.setMatches(null);
             else if (store.get().selectedId) app.select('');
@@ -319,8 +332,8 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
         if (event.key === '/') {
             event.preventDefault();
             palette.open();
-        } else if (event.key === '1' || event.key === '2' || event.key === '3') {
-            store.set({ view: ['graph', 'timeline', 'table'][Number(event.key) - 1] });
+        } else if (['1', '2', '3', '4'].includes(event.key)) {
+            store.set({ view: ['graph', 'timeline', 'table', 'schema'][Number(event.key) - 1] });
         } else if (event.key === '[') {
             toggleSidebar();
         } else if (event.key === ']') {

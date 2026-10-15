@@ -570,9 +570,9 @@ export function searchNodes(model, query, { limit = 30 } = {}) {
 export function formatFloor(node) {
     if (node.floorRange) {
         const { start, end } = node.floorRange;
-        return start === end ? `#${start}` : `#${start}–${end}`;
+        return start === end ? `第 ${start} 楼` : `第 ${start}–${end} 楼`;
     }
-    return node.seqTo >= 0 ? `T${node.seqTo}` : '';
+    return node.seqTo >= 0 ? `第 ${node.seqTo} 轮` : '';
 }
 
 export { fieldText };

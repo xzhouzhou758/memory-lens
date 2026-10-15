@@ -6,7 +6,7 @@
 
 import { h, clear, truncate, put } from '../util.js';
 import { icon } from '../icons.js';
-import { t, typeLabel, fieldLabel } from '../i18n.js';
+import { t, typeLabel, fieldLabel, depthLabel } from '../i18n.js';
 import { nodePassesFilters, contextState, formatFloor, fieldText, compareTimeline } from '../model.js';
 import { segmented, contextBadge, emptyState, typeDot } from '../ui/components.js';
 
@@ -92,7 +92,7 @@ export function createTableView(app) {
         const isEvent = activeType === 'event';
         const thead = h('thead', null, h('tr', null,
             headerCell(t('title'), 'title'),
-            cols.map(col => headerCell(fieldLabel(col), col)),
+            cols.map(col => headerCell(fieldLabel(col, activeType), col)),
             headerCell(isEvent ? t('floor') : t('degree'), isEvent ? 'seq' : 'degree'),
             h('th', { scope: 'col', class: 'ml-th-ctx' }, h('span', { class: 'ml-sr', text: t('context') }))));
         const tbody = h('tbody');
@@ -112,12 +112,12 @@ export function createTableView(app) {
                 },
             },
             h('td', { class: 'ml-td-title', 'data-label': t('title') },
-                h('span', { class: 'ml-td-title-inner' }, typeDot(node.type, { size: 8 }), h('span', { text: node.title }), node.isRollup ? h('span', { class: 'ml-tl-tag', text: t('depthTag', node.depth) }) : null)),
+                h('span', { class: 'ml-td-title-inner' }, typeDot(node.type, { size: 8 }), h('span', { text: node.title }), node.isRollup ? h('span', { class: 'ml-tl-tag', text: depthLabel(node.depth) }) : null)),
             cols.map(col => {
                 const value = isEvent && col === 'summary'
                     ? (node.parsed?.prose[0] || node.summaryText)
                     : fieldText(node.fields[col]);
-                return h('td', { 'data-label': fieldLabel(col), class: value ? null : 'is-empty', text: value ? truncate(value, isEvent ? 160 : 90) : '—' });
+                return h('td', { 'data-label': fieldLabel(col, activeType), class: value ? null : 'is-empty', text: value ? truncate(value, isEvent ? 160 : 90) : '—' });
             }),
             h('td', { class: 'ml-td-num', 'data-label': isEvent ? t('floor') : t('degree'), text: isEvent ? (formatFloor(node) || '—') : String(node.degree) }),
             h('td', { class: 'ml-td-ctx' }, contextBadge(ctx)));

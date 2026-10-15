@@ -57,7 +57,7 @@ test('buildModel indexes nodes, edges, hierarchy and injection', () => {
     assert.equal(contextState(model, 'e13'), 'recalled');
     assert.equal(contextState(model, 't_log'), 'pinned');
     assert.equal(contextState(model, 'e01'), '');
-    assert.equal(formatFloor(model.nodes.get('e01')), '#1–4');
+    assert.equal(formatFloor(model.nodes.get('e01')), '第 1–4 楼');
 });
 
 test('buildModel drops dangling edges, recall diagnostics and self loops', () => {
