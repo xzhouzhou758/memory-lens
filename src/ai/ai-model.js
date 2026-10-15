@@ -137,85 +137,72 @@ export function markRolledBack(messages, ids, payload) {
     }
 }
 
-// ----- Built-in prompts for the structure tools ---------------------------
+// ----- Prompts for the structure tools (AI 优化 / 完善这个类型) -------------
 //
-// How memory-graph uses a type, so the AI writes things that work:
-// - extractHint (类型说明): read by the extraction model to decide whether a
-//   fact belongs to this type and when to create / update an entry.
-// - columnHints (每个记录项的「给 AI 的提示」): the instruction the extractor
-//   follows when filling that item. Format, length, allowed values, how to
-//   name people consistently with other types.
-// - requiredColumns: the extractor must always fill these.
-// - alwaysInject: every entry goes into every reply's context (use for few,
-//   important entries: threads, rules, current goals). Costs context.
-// - latestOnly + primaryKeyColumns: one entry per identity (a person, a
-//   place); new info overwrites. Good for "current state" types.
-// - compression hierarchical: older entries fold into summaries (events).
+// Two layers:
+// - TASK: the bare minimum the tool needs to work (what to return, keep
+//   column keys). Always sent.
+// - BUILTIN: our optimisation guide — how memory-graph uses each part of a
+//   type, what good hints look like, which switches suit what. Sent when
+//   「使用内置优化提示词」 is ticked (default on).
+// The user's generation preset (e.g. a jailbreak preset) wraps both; we don't
+// touch it. The guide therefore tells the model to ignore prose-style
+// instructions from the preset for this task.
 
-const SCHEMA_PRIMER = [
-    'Context: a role-play memory system stores facts from the chat as typed entries ("memory types"). An extraction LLM reads each type\'s description and per-field instructions and fills entries; on later turns relevant entries are recalled into the chat model\'s context.',
-    'Parts of a type:',
-    '- extractHint: tells the extractor what belongs to this type and when to create or update an entry. 1–2 sentences.',
-    '- tableColumns + columnHints: the fields of an entry and, per field, the instruction the extractor follows (what to write, format, length, allowed values, how to spell names so they match other types).',
-    '- requiredColumns: fields the extractor must always fill. Keep this small (the identity field and the core fact).',
-    '- alwaysInject: every entry is put into every reply. Only for a few important entries (open threads, standing rules, active promises). It costs context.',
-    '- latestOnly + primaryKeyColumns: keep one entry per identity (e.g. per person or place); newer information overwrites. Use for "current state" types; primaryKeyColumns must be the identity field(s).',
-    '- compression.mode "hierarchical": old entries are folded into summaries. Only useful for high-volume, append-only types such as events.',
+const BUILTIN_GUIDE = [
+    '【任务性质】这是整理「记忆结构」的工具任务，不是写故事。预设里关于文风、叙事、节奏、人设扮演的要求在这里不适用；只按下面的规则输出。',
+    '',
+    '【记忆系统怎么用这些内容】角色扮演聊天里的事实会被一个「提取 AI」按类型记成条目，之后相关条目会被召回给聊天模型。',
+    '- 类型说明（extractHint）：提取 AI 靠它判断哪些事实属于这一类、什么时候新建或更新一条。一两句话。',
+    '- 记录项（tableColumns）和每项的「给 AI 的提示」（columnHints）：提取 AI 填这一项时照着做。要写清：填什么、格式、长度、可选值、什么时候留空、人名地名怎么写才能和其他类型对上。',
+    '- 必填（requiredColumns）：提取 AI 必须填。只给标识项和最核心的事实，少而精。',
+    '- 一直让 AI 看到（alwaysInject）：每次回复都带上所有条目。只适合少而重要的内容（剧情线、规则、进行中的约定），会占上下文。',
+    '- 同名只保留最新（latestOnly + primaryKeyColumns）：同一个对象只留一条，新信息覆盖旧的。适合「当前状态」类；主键必须是标识项。',
+    '- 自动合并成摘要（compression hierarchical）：旧条目合并成摘要。只适合数量多、只增不改的类型（如事件）。',
+    '',
+    '【好的「给 AI 的提示」】具体、可执行、短（一到三句）。例：「当事人全名，写法须与角色类型的名称一致；本人写 {{user}}。」避免空泛的「详细描述」。保留已有的约束、宏（如 {{user}}）、可选值列表和对其他类型的引用。',
+    '【语言】给人看的内容（名称、说明、提示）一律用简体中文；代码样的记号（{{user}}、表名）原样保留。',
 ];
 
-const REWRITE_RULES = {
-    columnHint: [
-        ...SCHEMA_PRIMER,
-        '',
-        'Task: improve ONE field instruction (columnHint). Make it clear, concrete and short: what to write, the format/length, allowed values, and what to leave empty. One to three sentences.',
-        'Keep every constraint already present (cross-references to other types, macros like {{user}}, enumerations). Do not invent unrelated requirements.',
-    ],
-    typeIntro: [
-        ...SCHEMA_PRIMER,
-        '',
-        'Task: improve ONE type description (extractHint): what this type records and when to create or update an entry. One or two sentences. Keep existing constraints.',
-    ],
+const TASK = {
+    columnHint: '任务：改写下面这一项的「给 AI 的提示」，让提取 AI 更容易照做。调用一次 submit_text，只交回改写后的提示文字。',
+    typeIntro: '任务：改写下面这个类型的说明：这类记忆记什么、什么时候新建或更新一条，一两句话。调用一次 submit_text，只交回改写后的说明。',
+    suggest: [
+        '任务：完善下面这一个记忆类型，让它记得好、用得上。调用一次 mg_schema_set_node_type，传入改进后的完整类型（id 不变）。',
+        '硬性要求：已有记录项的 key 一律不改（可以改它的提示）；没有用户要求不要删除已有记录项；新 key 用 snake_case 英文；extractionInstructions、keywords 等高级字段不要传。',
+    ].join('\n'),
 };
 
-const OUTPUT_LANGUAGE = 'Write all human-readable text (labels, descriptions, instructions) in Simplified Chinese. Keep code-like tokens ({{user}}, table names) unchanged.';
+const SUGGEST_GUIDE = [
+    '【完善类型时】',
+    '- 给一个清楚的中文名称和一两句类型说明。',
+    '- 记录项一般 4–9 个；第一项用来标识这一条（如「显示名」），每项都配上具体的提示。',
+    '- 按上面的规则慎重选择三个开关；开启「同名只保留最新」时设好主键。',
+    '- 与其他类型保持一致：提到人和地点时用它们的写法。',
+    '- 工具调用后，用一句中文概括你的主要思路。',
+];
 
-export function rewriteSystemPrompt(kind) {
-    const rules = REWRITE_RULES[kind] || REWRITE_RULES.columnHint;
-    return [...rules, OUTPUT_LANGUAGE, 'Return the result by calling submit_text once with only the rewritten text.'].join('\n');
+export function rewriteSystemPrompt(kind, { builtin = true } = {}) {
+    return [...(builtin ? [...BUILTIN_GUIDE, ''] : []), TASK[kind] || TASK.columnHint].join('\n');
+}
+
+export function suggestSystemPrompt({ builtin = true } = {}) {
+    return [...(builtin ? [...BUILTIN_GUIDE, '', ...SUGGEST_GUIDE, ''] : []), TASK.suggest].join('\n');
 }
 
 export function rewriteUserPrompt({ kind, text, typeName = '', itemName = '', siblings = [] }) {
     const lines = [];
-    if (typeName) lines.push(`Memory type: ${typeName}`);
-    if (itemName) lines.push(`Field: ${itemName}`);
-    if (siblings.length) lines.push(`Other fields of this type: ${siblings.slice(0, 40).join('、')}`);
-    lines.push('', kind === 'typeIntro' ? 'Current description:' : 'Current instruction:', String(text || '') || '(empty — write one)');
+    if (typeName) lines.push(`记忆类型：${typeName}`);
+    if (itemName) lines.push(`记录项：${itemName}`);
+    if (siblings.length) lines.push(`这个类型的其他记录项：${siblings.slice(0, 40).join('、')}`);
+    lines.push('', kind === 'typeIntro' ? '当前说明：' : '当前提示：', String(text || '') || '（空，请写一段）');
     return lines.join('\n');
-}
-
-export function suggestSystemPrompt() {
-    return [
-        ...SCHEMA_PRIMER,
-        '',
-        'Task: complete and improve ONE memory type so it records well. Call mg_schema_set_node_type exactly once with the full improved type (same id).',
-        'Do:',
-        '- Give it a clear Chinese label and a 1–2 sentence extractHint.',
-        '- Propose the fields an entry needs (usually 4–9). The first field should identify the entry (e.g. title: 显示名). Each field gets a columnHint with what to write, format and length.',
-        '- Mark only essential fields as required.',
-        '- Choose alwaysInject / latestOnly / compression deliberately using the rules above; set primaryKeyColumns when latestOnly is on.',
-        'Keep:',
-        '- Every existing column key unchanged (you may rewrite its hint). Do not delete existing fields unless the user asked; new keys must be snake_case ASCII.',
-        '- extractionInstructions, keywords and other advanced fields as they are (omit them).',
-        '- Consistency with the other types listed (use their field names when referring to people / places).',
-        OUTPUT_LANGUAGE,
-        'After the tool call, reply with one short Chinese sentence summarising the main idea.',
-    ].join('\n');
 }
 
 const briefType = (t) => {
     const hints = t.columnHints || {};
     const cols = (t.tableColumns || []).map(k => `${k}${hints[k] ? `（${String(hints[k]).slice(0, 40)}）` : ''}`).join('、');
-    return `- ${t.id} 「${t.label || t.id}」: ${cols}`;
+    return `- ${t.id}「${t.label || t.id}」：${cols}`;
 };
 
 export function suggestUserPrompt({ spec, others = [], request = '' }) {
@@ -232,12 +219,12 @@ export function suggestUserPrompt({ spec, others = [], request = '' }) {
         compression: { mode: spec.compression?.mode || 'none' },
     } : {};
     return [
-        request.trim() ? `User request: ${request.trim()}` : 'User request: (none — use your judgement to make this type complete and useful)',
+        `用户要求：${request.trim() || '（没有，按这个类型的用途自己判断，让它完整好用）'}`,
         '',
-        'Type to complete (JSON):',
+        '要完善的类型（JSON）：',
         JSON.stringify(current, null, 2),
         '',
-        'Other types in this schema (for consistency):',
-        others.map(briefType).join('\n') || '(none)',
+        '结构里的其他类型（保持一致用）：',
+        others.map(briefType).join('\n') || '（无）',
     ].join('\n');
 }

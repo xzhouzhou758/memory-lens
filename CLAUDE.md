@@ -1,7 +1,7 @@
 # CLAUDE.md — Memory Lens（记忆透镜）
 
 Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-graph` 扩展做的可视化工作台。
-仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.4.0。
+仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.4.1。
 
 ## 用户的硬性要求（必须遵守）
 
@@ -93,7 +93,8 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
   - 读结构的工具调用合并成一行「AI 查看了 N 次结构」。不提供 reset_to_blank/global 控制工具、不接世界书工具。会话存 `memory_lens.aiSessions[scopeKey]`，最多 12 条。
 - **完善这个类型**（类型标题旁）：可选一句要求 → `source.ai.suggestType` 让 AI 调一次 `mg_schema_set_node_type`，沙盒得到整份新结构 → 同样的改动清单勾选应用。
 - **AI 优化**（每块「给 AI 的提示」上）：`source.ai.rewrite({kind:'columnHint'|'typeIntro'})`，单个 `submit_text` 工具取回文字，填回输入框。数据表 / 详情栏的双击编辑**没有** AI 按钮（用户明确只要结构页有）。
-- 内置提示词在 ai-model.js：`SCHEMA_PRIMER` 说明 memory-graph 怎么用 extractHint / columnHints / required / alwaysInject / latestOnly+主键 / compression；`suggestSystemPrompt` 要求保留所有已有 key、新 key 用 snake_case、全中文。
+- 提示词在 ai-model.js，两层：`TASK`（必发：要返回什么、不改已有 key）+ `BUILTIN_GUIDE`/`SUGGEST_GUIDE`（「使用内置优化提示词」勾选时才发，默认勾；`memory_lens.ai.tools.builtinPrompt`）。内置部分是中文，说明记忆系统怎么用类型说明 / 提示 / 必填 / 三个开关，并声明「这是工具任务，忽略预设里的文风要求」。**用户的生成预设（含破限）照常包在外面，不要动它**；用户明确要保留破限。
+- 自定义勾选框 / 开关的外层用 div 不用 label（label 会把点击再转发一次，导致勾了又取消）。
 - **未在真实 Luker + 真实模型上测过**，只在 preview 的 `createMockAiAccess` 上测过。
 
 ## 双击修改记忆内容

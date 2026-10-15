@@ -65,15 +65,17 @@ test('toolCallText names the target in Chinese', () => {
     assert.equal(toolCallText({ name: 'mg_schema_read_fields', args: {} }), '查看当前结构');
 });
 
-test('built-in structure prompts explain the parts and keep keys', async () => {
+test('built-in guide is optional; task rules always sent', async () => {
     const { rewriteSystemPrompt, rewriteUserPrompt, suggestSystemPrompt, suggestUserPrompt } = await import('../src/ai/ai-model.js');
-    assert.match(rewriteSystemPrompt('columnHint'), /field instruction/);
-    assert.match(rewriteSystemPrompt('typeIntro'), /extractHint/);
-    assert.match(rewriteUserPrompt({ kind: 'columnHint', text: '' }), /empty/);
-    const sys = suggestSystemPrompt();
-    assert.match(sys, /existing column key unchanged/);
-    assert.match(sys, /alwaysInject/);
-    assert.match(sys, /Simplified Chinese/);
+    const withGuide = suggestSystemPrompt({ builtin: true });
+    const bare = suggestSystemPrompt({ builtin: false });
+    assert.match(withGuide, /不是写故事/);
+    assert.match(withGuide, /alwaysInject/);
+    assert.doesNotMatch(bare, /不是写故事/);
+    assert.match(bare, /key 一律不改/, 'key rule always present');
+    assert.match(rewriteSystemPrompt('columnHint', { builtin: false }), /submit_text/);
+    assert.match(rewriteSystemPrompt('typeIntro'), /类型的说明/);
+    assert.match(rewriteUserPrompt({ kind: 'columnHint', text: '' }), /请写一段/);
     const user = suggestUserPrompt({ spec: { id: 'todo', label: '待办', tableColumns: ['title'], columnHints: { title: '显示名' } }, others: [{ id: 'character_sheet', label: '角色', tableColumns: ['title'] }], request: '要记截止时间' });
     assert.match(user, /要记截止时间/);
     assert.match(user, /"id": "todo"/);

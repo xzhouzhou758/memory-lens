@@ -303,7 +303,7 @@ export function createLargeSnapshot(count = 600) {
 /** Scripted stand-in for the AI schema assistant (preview only, no network). */
 export function createMockAiAccess() {
     let sessions = [];
-    let aiSettings = { assistant: { api: '', preset: '' }, tools: { same: true, api: '', preset: '' } };
+    let aiSettings = { assistant: { api: '', preset: '' }, tools: { same: true, api: '', preset: '', builtinPrompt: true } };
     const wait = (ms, signal) => new Promise((resolve, reject) => {
         const timer = setTimeout(resolve, ms);
         signal?.addEventListener('abort', () => { clearTimeout(timer); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); });

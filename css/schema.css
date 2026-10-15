@@ -553,3 +553,7 @@
 .mlens .ml-ask { display: flex; flex-direction: column; gap: 10px; }
 .mlens .ml-ask-text { font-size: 13px; color: var(--ml-text-muted); }
 .mlens .ml-ask-input { min-height: 72px; }
+.mlens .ml-aiset-same { align-items: flex-start; }
+.mlens .ml-aiset-same .ml-check { margin-top: 2px; }
+.mlens .ml-aiset-check-text { display: flex; flex-direction: column; gap: 2px; }
+.mlens .ml-aiset-sub { font-size: 11.5px; color: var(--ml-text-faint); line-height: 1.5; }

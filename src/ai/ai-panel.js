@@ -67,7 +67,7 @@ export function createAiPanel(access, host) {
             try { localStorage.setItem(PREF_KEY, autoApply ? '1' : '0'); } catch { /* ignore */ }
         },
     }, icon('check', { size: 11 }));
-    const autoRow = h('label', { class: 'ml-ai-auto', onClick: (e) => { if (e.target !== autoBox && !autoBox.contains(e.target)) autoBox.click(); } },
+    const autoRow = h('div', { class: 'ml-ai-auto', onClick: (e) => { if (e.target !== autoBox && !autoBox.contains(e.target)) autoBox.click(); } },
         autoBox, h('span', { id: 'ml-ai-auto-label', text: t('aiAutoApply') }), h('span', { class: 'ml-ai-auto-note', text: t('aiAutoApplyNote') }));
     const el = h('aside', { class: 'ml-ai', 'aria-label': t('aiTitle') },
         head, historyBox, log,

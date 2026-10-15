@@ -323,6 +323,7 @@ function createAiAccess(resolveApi) {
         const ai = all[LABEL_KEY].ai;
         ai.assistant ||= { api: '', preset: '' };
         ai.tools ||= { same: true, api: '', preset: '' };
+        if (ai.tools.builtinPrompt === undefined) ai.tools.builtinPrompt = true;
         return ai;
     };
     const presetsFor = (ctx, settings, role) => {
@@ -342,6 +343,10 @@ function createAiAccess(resolveApi) {
             description: 'Submit the rewritten text. Call exactly once.',
             parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
         },
+    };
+
+    const useBuiltin = () => {
+        try { return aiSettings(resolveApi().ctx).tools.builtinPrompt !== false; } catch { return true; }
     };
 
     async function oneShot(role, { system, user, tools, allowedNames, signal = null }) {
@@ -393,7 +398,7 @@ function createAiAccess(resolveApi) {
             const { ctx } = resolveApi();
             const ai = aiSettings(ctx);
             ai.assistant = { api: String(next?.assistant?.api || ''), preset: String(next?.assistant?.preset || '') };
-            ai.tools = { same: next?.tools?.same !== false, api: String(next?.tools?.api || ''), preset: String(next?.tools?.preset || '') };
+            ai.tools = { same: next?.tools?.same !== false, api: String(next?.tools?.api || ''), preset: String(next?.tools?.preset || ''), builtinPrompt: next?.tools?.builtinPrompt !== false };
             ctx.saveSettingsDebounced?.();
         },
 
@@ -413,7 +418,7 @@ function createAiAccess(resolveApi) {
         /** AI 优化 for one schema text (item hint / type intro). */
         async rewrite(request) {
             const result = await oneShot('tools', {
-                system: rewriteSystemPrompt(request.kind),
+                system: rewriteSystemPrompt(request.kind, { builtin: useBuiltin() }),
                 user: rewriteUserPrompt(request),
                 tools: [SUBMIT_TEXT],
                 allowedNames: ['submit_text'],
@@ -435,7 +440,7 @@ function createAiAccess(resolveApi) {
             if (!setTool) throw new SourceError('ai-unsupported');
             const spec = live.find(t => String(t.id) === String(typeId));
             const result = await oneShot('tools', {
-                system: suggestSystemPrompt(),
+                system: suggestSystemPrompt({ builtin: useBuiltin() }),
                 user: suggestUserPrompt({ spec, others: live.filter(t => t !== spec), request }),
                 tools: [setTool],
                 allowedNames: ['mg_schema_set_node_type'],
