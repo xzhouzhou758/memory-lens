@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { editRule, toEditText, fromEditText, isChanged, prefersMultiline } from '../src/edit/edit-model.js';
+import { editRule, toEditText, fromEditText, isChanged, hasParagraphs } from '../src/edit/edit-model.js';
 
 test('editRule blocks rollups, archived nodes and event titles', () => {
     assert.equal(editRule({ type: 'character_sheet' }, 'identity').ok, true);
@@ -29,9 +29,8 @@ test('isChanged ignores whitespace and identical lists', () => {
     assert.equal(isChanged('', undefined), false);
 });
 
-test('long or multi-line values use a textarea', () => {
-    assert.equal(prefersMultiline('summary', '短'), true);
-    assert.equal(prefersMultiline('identity', '短'), false);
-    assert.equal(prefersMultiline('note', 'a\nb'), true);
-    assert.equal(prefersMultiline('note', 'x'.repeat(41)), true);
+test('only paragraph text saves with Ctrl+Enter', () => {
+    assert.equal(hasParagraphs('summary', '短'), true);
+    assert.equal(hasParagraphs('identity', 'x'.repeat(80)), false);
+    assert.equal(hasParagraphs('note', 'a\nb'), true);
 });

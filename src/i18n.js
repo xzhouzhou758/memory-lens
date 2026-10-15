@@ -38,7 +38,7 @@ const STRINGS = {
     schemaTitle: '记忆结构', schemaIntro: '决定 AI 会记哪些类型、每类记录哪些内容。',
     schemaTypes: '记忆类型', schemaAddType: '新建类型', schemaItems: '记录项', schemaAddItem: '添加一项',
     schemaName: '名称', schemaNamePh: '例如：物品', schemaIntroLabel: '这类记忆是什么', schemaIntroPh: '一句话说明这类记忆记什么（可不填）',
-    schemaItemName: '名称', schemaItemNamePh: '例如：身份', schemaItemHint: '说明', schemaItemHintPh: '告诉 AI 这一项该写什么',
+    schemaItemName: '名称', schemaItemNamePh: '例如：身份', schemaUnnamedPh: '未命名项，起个名字', schemaItemHint: '说明', schemaItemHintPh: '告诉 AI 这一项该写什么',
     schemaRequired: '必须填写', schemaRequiredShort: '必填', schemaDefaultHint: '沿用默认说明', schemaNoHint: '添加说明', schemaLocked: '这一项是事件的正文，不能删除',
     schemaBehavior: '记录方式',
     schemaAlwaysInject: '一直让 AI 看到', schemaAlwaysInjectHint: '每次回复都带上，不用等召回。适合剧情线、规则这类少而重要的内容。',
@@ -60,8 +60,11 @@ const STRINGS = {
     schemaSaveFailed: '保存失败：{0}', schemaNoChar: '未选择角色',
     schemaLeaveConfirm: '记忆结构有未保存的修改，确定离开？',
     edit: '修改', editField: '修改{0}', editHint: '双击修改', editEmpty: '未填写（双击填写）',
-    editKeys: 'Enter 保存 · Esc 取消', editKeysMulti: 'Ctrl+Enter 保存 · Esc 取消',
+    editKeys: 'Enter 保存 · Esc 取消', editKeysWrap: 'Enter 保存 · Shift+Enter 换行 · Esc 取消', editKeysMulti: 'Ctrl+Enter 保存 · Esc 取消',
     editSaved: '已修改', editFailed: '修改失败：{0}', editEmptyTitle: '名称不能为空',
+    aiPromptTag: '给 AI 的提示', aiPromptEditing: '正在编辑给 AI 的提示',
+    aiPromptItemNote: 'AI 记录这一项时会按这里写的去填', aiPromptTypeNote: 'AI 用它判断哪些内容记成这一类',
+    aiOptimize: 'AI 优化', aiOptimizeValueHint: '按这一项的「给 AI 的提示」改写，只润色不添加新内容。改完仍需保存', aiOptimizeHint: '让 AI 改写得更清楚、更好用（不保存，可再改）', aiOptimizing: 'AI 优化中…',
     aiTitle: 'AI 助手', aiPlaceholder: '说说想怎么改，比如「加一个物品类型」', aiSend: '发送', aiStop: '停止',
     aiHistory: '历史对话', aiNew: '新对话', aiNoHistory: '还没有历史对话', aiUntitled: '未命名对话', aiDeleteSession: '删除这段对话',
     aiEmptyTitle: '让 AI 帮你改记忆结构', aiEmptySub: 'AI 的修改会先放进左边的编辑器，检查没问题再点保存。',
@@ -128,7 +131,8 @@ export function hasFieldLabel(key) {
 
 /** Display name for a record item; `type` lets user-defined names win. */
 export function fieldLabel(key, type = '') {
-    return (type && customFieldLabels[type]?.[key]) || FIELD_LABELS[key] || key;
+    // Unknown keys (fields not in the schema) never show as English.
+    return (type && customFieldLabels[type]?.[key]) || FIELD_LABELS[key] || (/[\u3400-\u9fff]/.test(key) ? key : '未命名项');
 }
 
 /** "一级摘要" for depth 1, etc. */

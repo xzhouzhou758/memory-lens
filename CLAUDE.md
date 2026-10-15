@@ -1,7 +1,7 @@
 # CLAUDE.md — Memory Lens（记忆透镜）
 
 Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-graph` 扩展做的可视化工作台。
-仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.3.0。
+仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.3.1。
 
 ## 用户的硬性要求（必须遵守）
 
@@ -14,7 +14,7 @@ Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-grap
 ## 命令
 
 ```bash
-npm test                      # node:test，无依赖，Node ≥ 20（当前 38 个用例）
+npm test                      # node:test，无依赖，Node ≥ 20（当前 39 个用例）
 npm run preview               # http://127.0.0.1:4173/preview/index.html 示例数据
 # 预览参数：?data=demo|large|empty|error  &theme=dark|light  &view=graph|timeline|table|schema  &n=800
 ```
@@ -48,7 +48,7 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
 约定：
 - DOM 用 `h()`（util.js），追加子节点用 `put()`，**不要用原生 `append`**（会把 null 变成 "null" 文本）。不用 innerHTML。
 - 纯模块（model.js、layout.js、i18n.js、schema-model.js、mock-data.js）不能碰 DOM，测试在 Node 里直接导入。
-- CSS 全部在 `.mlens` 作用域下；z-index 30500；不用原生 checkbox（Luker 全局样式会污染），开关用 `button[role=switch]`。
+- CSS 全部在 `.mlens` 作用域下；z-index 2147482000（要盖过其他悬浮脚本）；全屏尺寸由 `src/viewport.js` 按 visualViewport 写成 px（iOS 上 Luker 把 body 设成 fixed，`inset:0` 会算错），CSS 只作兜底；不要给根节点加 `contain`；不用原生 checkbox（Luker 全局样式会污染），开关用 `button[role=switch]`。
 - 根节点拦截 keydown 冒泡，防止 Luker 的全局快捷键（←/→ 切换回复等）触发。
 
 ## 与 Luker / memory-graph 的对接（最易出问题的地方）
@@ -79,7 +79,8 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
 - 一行一个记录项：拖动 / 名称 / 说明预览（点开才编辑）/ 必填 / 删除；键盘在拖动柄上用 ↑↓ 排序。三个开关：一直让 AI 看到（alwaysInject）、同名只保留最新（latestOnly）、自动合并成摘要（compression.mode，只在 event 或已开启时显示）。
 - 不暴露、原样保留：`extractionInstructions`、`compression.summarizeInstruction`、压缩数值、`keywords`、`ragPerTypeK`、`tableName`、`level` 等。
 - 主键：latestOnly 开启且无主键时自动选 title/name/aliases；新建项默认加入向量检索列。
-- 字段显示名优先级：用户命名 > 内置翻译表 > 说明的第一个中文短语（≤12 字）> key。
+- 字段显示名优先级：用户命名 > 内置翻译表 > 说明的第一个中文短语（≤12 字）> 说明开头截取的中文 > 「未命名项」。**界面上永远不显示英文 key**（i18n `fieldLabel` 同样兜底）。未命名的旧项在编辑器里名称框留空、占位提示起名，不阻止保存；新建项必须起名。
+- 记录项说明和类型简介都标「给 AI 的提示」（它们就是发给提取 AI 的提示词）。
 - 保存前弹窗列出中文改动摘要（`describeChanges`），保存后 12 秒内可撤销。
 - 允许类型重名（用户的自定义“剧情线”和内置 thread 都叫“剧情线”）。
 
@@ -93,10 +94,11 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
 
 ## 双击修改记忆内容
 
-- 交互：`src/edit/inline-edit.js` 的 `editable(el, {app, node, key, value})`；key '' = 节点标题。单行 Enter 保存，多行（正文、长文本）Ctrl/⌘+Enter；Esc 取消；点别处保存。保存后底部提示可撤销（10 秒）。编辑中实时刷新会推迟。
+- 交互：`src/edit/inline-edit.js` 的 `editable(el, {app, node, key, value})`；key '' = 节点标题。原格子显示超过一行就用同宽的自增高 textarea（按实际显示判断，不按字数）；表格单元格保留 td 本身只换内容。Enter 保存、Shift+Enter 换行；有分段的内容（事件正文、含换行）才用 Ctrl/⌘+Enter；光标放末尾不全选；Esc 取消；点别处保存。保存后底部提示可撤销（10 秒）。编辑中实时刷新会推迟。
 - 规则（`edit-model.js`）：自动合并摘要（rollup）、已归档不可改；事件标题自动生成不可改（改正文）。数组字段用「、」拆合，保持原类型。
 - 写入（source-luker.js `createEditAccess`）：照 memory-graph 图谱迭代工作室的手动编辑路径——`ensureStoreSyncedWithChat` → 副本上 `getMemoryGraphWriteApi(..., {useInFlightAnchor:false, preserveSeqOnEdit:true}).editNode` → `commitGraphUiMutation` → `syncGraphVectorsAfterMutation`。内部函数不在时退回公开的 `openSession(ctx).editNode`（会推进 seqTo）。
-- **未在真实 Luker 中测过**，只在 preview 的 `createMockEditAccess` 上测过。
+- 「AI 优化」按钮：`app.rewriteValue` → `source.ai.rewrite({kind:'memoryValue', instruction: 该项 columnHint, siblings: 已知名称, context: 同条其他字段})`。只润色不加事实；结果填回编辑框，用户自己保存。记忆结构页的「给 AI 的提示」（记录项说明 kind:'columnHint'、类型简介 kind:'typeIntro'）也有同样按钮。提示词在 ai-model.js `rewriteSystemPrompt/rewriteUserPrompt`。
+- **未在真实 Luker 中测过**，只在 preview 的 mock 上测过。
 
 ## 待办 / 可能的下一步
 

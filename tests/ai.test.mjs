@@ -64,3 +64,13 @@ test('toolCallText names the target in Chinese', () => {
     assert.equal(toolCallText({ name: 'mg_schema_set_node_type', args: { label: '物品' } }), '修改类型「物品」');
     assert.equal(toolCallText({ name: 'mg_schema_read_fields', args: {} }), '查看当前结构');
 });
+
+test('rewrite prompts carry the field instruction and forbid new facts', async () => {
+    const { rewriteSystemPrompt, rewriteUserPrompt } = await import('../src/ai/ai-model.js');
+    assert.match(rewriteSystemPrompt('memoryValue'), /Do NOT add facts/);
+    assert.match(rewriteSystemPrompt('columnHint'), /field instruction/);
+    const user = rewriteUserPrompt({ kind: 'memoryValue', text: '原文', typeName: '角色', itemName: '目标', instruction: '一句话 40 字内', siblings: ['林书瑶', '周派'] });
+    assert.match(user, /Field instruction: 一句话 40 字内/);
+    assert.match(user, /Known names: 林书瑶、周派/);
+    assert.ok(user.endsWith('原文'));
+});

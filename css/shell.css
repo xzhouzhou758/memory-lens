@@ -2,7 +2,10 @@
 .mlens {
     position: fixed;
     inset: 0;
-    z-index: 30500;
+    /* Above Luker's UI and floating helper scripts; size is refined in px by viewport.js. */
+    z-index: 2147482000;
+    width: 100vw; height: 100vh; height: 100dvh;
+    overscroll-behavior: contain;
     display: flex;
     flex-direction: column;
     background: var(--ml-bg);
@@ -15,9 +18,9 @@
     text-rendering: optimizeLegibility;
     outline: none;
     animation: ml-enter 220ms var(--ml-ease);
-    contain: layout style;
+    isolation: isolate;
 }
-.mlens.is-embedded { position: relative; inset: auto; z-index: auto; height: 100%; animation: none; }
+.mlens.is-embedded { position: relative; inset: auto; z-index: auto; width: auto; height: 100%; animation: none; }
 
 .mlens *, .mlens *::before, .mlens *::after { box-sizing: border-box; }
 .mlens [hidden] { display: none !important; }

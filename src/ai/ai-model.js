@@ -136,3 +136,42 @@ export function markRolledBack(messages, ids, payload) {
         m.rolledBack = true;
     }
 }
+
+// ----- One-shot rewrite ("AI 优化") -----------------------------------------
+
+const REWRITE_RULES = {
+    memoryValue: [
+        'You polish one stored field of a long-term memory graph used by a role-play memory system.',
+        'Downstream readers are LLMs: the extractor that updates this memory and the chat model that receives it on recall.',
+        'Rewrite the value so it follows the field instruction exactly (format, length, required parts), states facts plainly and unambiguously, and uses the same spelling for people / places as the known names given.',
+        'Do NOT add facts, guesses or details that are not in the original. Do not drop facts. Keep it in Simplified Chinese unless the original is in another language.',
+        'Keep list-like values as a list separated by "、". Keep line breaks and section labels of multi-paragraph values.',
+    ],
+    columnHint: [
+        'You improve one field instruction in a memory schema. The instruction is read by an extraction LLM that fills this field from role-play chat.',
+        'Make it clear, concrete and short: what to write, the format/length, and what to leave out. One to three sentences.',
+        'Keep every constraint already present (cross-references to other tables, macros like {{user}}, enumerations). Do not invent new requirements.',
+        'Write in Simplified Chinese; keep code-like tokens unchanged.',
+    ],
+    typeIntro: [
+        'You improve the description of one memory type in a memory schema. An extraction LLM reads it to decide which facts belong to this type.',
+        'Make it clear and short (one or two sentences): what this type records and when to create or update an entry. Keep existing constraints.',
+        'Write in Simplified Chinese; keep code-like tokens unchanged.',
+    ],
+};
+
+export function rewriteSystemPrompt(kind) {
+    const rules = REWRITE_RULES[kind] || REWRITE_RULES.memoryValue;
+    return [...rules, 'Return the result by calling submit_text once with only the rewritten text.'].join('\n');
+}
+
+export function rewriteUserPrompt({ kind, text, typeName = '', itemName = '', instruction = '', siblings = [], context = '' }) {
+    const lines = [];
+    if (typeName) lines.push(`Memory type: ${typeName}`);
+    if (itemName) lines.push(`Field: ${itemName}`);
+    if (kind === 'memoryValue' && instruction) lines.push(`Field instruction: ${instruction}`);
+    if (siblings.length) lines.push(`${kind === 'memoryValue' ? 'Known names' : 'Other fields of this type'}: ${siblings.slice(0, 40).join('、')}`);
+    if (context) lines.push(`Other fields of this entry:\n${context}`);
+    lines.push('', 'Original:', String(text || ''));
+    return lines.join('\n');
+}

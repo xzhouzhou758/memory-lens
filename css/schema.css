@@ -198,11 +198,6 @@
 .mlens .ml-schema-hintbtn-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mlens .ml-schema-hintbtn svg { flex: none; opacity: 0.6; }
 
-.mlens .ml-schema-itemhint {
-    display: block; width: auto;
-    margin: 0 10px 10px 34px;
-    font-size: 12.5px; color: var(--ml-text);
-}
 
 .mlens .ml-schema-req {
     flex: none;
@@ -440,3 +435,32 @@
 .mlens .ml-ai-send.is-busy { background: var(--ml-text-muted); }
 .mlens .ml-ai-send:disabled { opacity: 0.4; cursor: default; }
 .mlens .ml-ai-foot { flex: none; padding: 6px 14px 10px; font-size: 11px; color: var(--ml-text-faint); }
+
+/* ---- "给 AI 的提示" blocks ---- */
+.mlens .ml-schema-ai-mark {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 5px;
+    background: var(--ml-accent-soft); color: var(--ml-accent);
+}
+.mlens .ml-schema-item.is-open .ml-schema-hintbtn-text { color: var(--ml-text-faint); font-style: normal; }
+
+.mlens .ml-prompt { display: flex; flex-direction: column; gap: 6px; }
+.mlens .ml-schema-item .ml-prompt { padding: 2px 12px 12px 32px; }
+.mlens .ml-prompt.is-compact { margin-top: 2px; }
+.mlens .ml-prompt-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.mlens .ml-prompt-tag {
+    flex: none; display: inline-flex; align-items: center; gap: 4px;
+    height: 20px; padding: 0 7px; border-radius: 999px;
+    background: var(--ml-accent-soft); color: var(--ml-accent);
+    font-size: 11px; font-weight: 600;
+}
+.mlens .ml-prompt-note { flex: 1; min-width: 0; font-size: 11.5px; color: var(--ml-text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mlens .ml-ai-optimize { flex: none; color: var(--ml-accent); }
+.mlens .ml-ai-optimize.is-busy { opacity: 0.6; cursor: progress; }
+.mlens .ml-prompt .ml-schema-itemhint {
+    margin: 0; width: 100%;
+    font-size: 13px; line-height: 1.65; color: var(--ml-text);
+    padding: 8px 10px;
+    background: var(--ml-surface-2);
+}
+.mlens .ml-prompt.is-compact .ml-schema-intro { margin-left: 0; width: 100%; padding: 6px 8px; border-color: var(--ml-border); background: var(--ml-surface-2); }

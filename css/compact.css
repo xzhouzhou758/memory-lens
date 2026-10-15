@@ -140,7 +140,8 @@
 .mlens.is-compact .ml-schema-item-line { flex-wrap: wrap; min-height: 48px; }
 .mlens.is-compact .ml-schema-itemname { flex: 1 1 0; }
 .mlens.is-compact .ml-schema-hintbtn { order: 5; flex-basis: 100%; height: 28px; padding-left: 34px; }
-.mlens.is-compact .ml-schema-itemhint { margin-left: 10px; }
+.mlens.is-compact .ml-schema-item .ml-prompt { padding: 2px 10px 12px; }
+.mlens.is-compact .ml-prompt-note { white-space: normal; }
 .mlens.is-compact .ml-schema-req { height: 30px; }
 .mlens.is-compact .ml-schema-flag { padding: 12px; }
 .mlens.is-compact .ml-schema-modal-foot .ml-btn { height: 40px; }

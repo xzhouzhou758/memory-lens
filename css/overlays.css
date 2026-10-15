@@ -47,21 +47,22 @@
 
 /* ---- Inline editing ---- */
 .mlens .ml-editable[data-editable="true"] { cursor: text; border-radius: var(--ml-radius-sm); transition: background var(--ml-dur), box-shadow var(--ml-dur); }
-.mlens .ml-editable[data-editable="true"]:hover { background: var(--ml-hover); box-shadow: 0 0 0 3px var(--ml-hover); }
+.mlens .ml-editable[data-editable="true"]:not(.is-editing):hover { background: var(--ml-hover); box-shadow: 0 0 0 3px var(--ml-hover); }
 .mlens .ml-editable[data-editable="true"]:focus-visible { outline: 2px solid var(--ml-accent); outline-offset: 2px; }
+.mlens .ml-editable.is-editing { background: none; box-shadow: none; }
 .mlens dd.ml-editable.is-empty { color: var(--ml-text-faint); font-style: normal; }
-.mlens .ml-inline { display: inline-flex; flex-direction: column; gap: 3px; width: 100%; vertical-align: top; }
+.mlens .ml-inline { display: flex; flex-direction: column; gap: 4px; width: 100%; min-width: 0; vertical-align: top; }
 .mlens .ml-inline-input {
-    width: 100%; min-width: 120px;
+    display: block; width: 100%; min-width: 0;
     border: 1px solid var(--ml-accent); border-radius: var(--ml-radius-sm);
     background: var(--ml-surface); color: var(--ml-text);
-    font: inherit; font-size: inherit; font-weight: inherit; line-height: 1.55;
-    padding: 4px 8px; outline: none; resize: none;
+    font: inherit; font-size: inherit; font-weight: inherit; line-height: inherit; letter-spacing: inherit;
+    padding: 4px 8px; margin: -5px -9px 0; width: calc(100% + 18px);
+    outline: none; resize: none;
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--ml-accent) 18%, transparent);
 }
-.mlens .ml-inline-input.is-multi { min-height: 64px; overflow: auto; font-size: 13px; font-weight: 400; }
-.mlens .ml-inline-hint { font-size: 11px; font-weight: 400; color: var(--ml-text-faint); }
-.mlens .ml-table td > .ml-inline { min-width: 180px; }
+.mlens .ml-inline-input.is-multi { overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.mlens .ml-inline-hint { font-size: 11px; font-weight: 400; color: var(--ml-text-faint); white-space: nowrap; }
 
 /* ---- Shared bottom toast (edit saved / undo) ---- */
 .mlens .ml-toast {
@@ -83,3 +84,13 @@
     color: var(--ml-accent); font-size: 13px; font-weight: 600; padding: 0 4px; margin-left: 4px;
 }
 .mlens .ml-toast-btn:hover { text-decoration: underline; }
+.mlens .ml-inline-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; }
+.mlens .ml-inline-foot .ml-inline-hint { margin-top: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mlens .ml-inline-ai {
+    flex: none; display: inline-flex; align-items: center; gap: 4px;
+    height: 22px; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--ml-accent) 40%, transparent);
+    border-radius: 999px; background: var(--ml-accent-soft); color: var(--ml-accent);
+    font-size: 11.5px; font-weight: 600; cursor: pointer;
+}
+.mlens .ml-inline-ai:hover { background: color-mix(in srgb, var(--ml-accent) 22%, transparent); }
+.mlens .ml-inline-ai:disabled { opacity: 0.6; cursor: progress; }

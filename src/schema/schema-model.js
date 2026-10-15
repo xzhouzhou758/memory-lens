@@ -40,16 +40,23 @@ export function typeDisplayName(spec) {
 
 /**
  * Short Chinese name for a column: user label > built-in translation >
- * the head of its hint ("剧情线名称，简短可指认…" → "剧情线名称") > raw key.
+ * the head of its hint ("剧情线名称，简短可指认…" → "剧情线名称") >
+ * a clipped Chinese head of the hint > 未命名项. Never the raw key.
  */
 export function columnDisplayName(typeId, key, hint, storedLabels) {
     const stored = storedLabels?.[typeId]?.[key];
     if (stored) return stored;
     if (hasFieldLabel(key)) return fieldLabel(key);
-    const head = String(hint || '').trim().split(/[，,。．.；;：:（(\n|]/)[0].trim();
+    const text = String(hint || '').trim();
+    const head = text.split(/[，,。．.；;：:（(\n|]/)[0].trim();
     if (head && CJK.test(head) && head.length <= 12) return head;
-    return key;
+    const cjkHead = (text.match(/^[^A-Za-z]*?([\u3400-\u9fff][\u3400-\u9fff·／/、]{1,9})/) || [])[1];
+    if (cjkHead) return cjkHead.replace(/[、／/]+$/, '');
+    return UNNAMED;
 }
+
+export const UNNAMED = '未命名项';
+export const isUnnamed = (label) => !label || label === UNNAMED;
 
 /** Labels for every type/column, for the read views. */
 export function buildLabelMaps(schemaTypes, storedLabels) {
@@ -100,7 +107,8 @@ export function toDraft(spec, storedLabels = {}, defaultSpec = null) {
             return {
                 uid: uid('c'),
                 key,
-                label: columnDisplayName(id, key, originalHint, storedLabels),
+                // Unnamed items open with an empty name box (placeholder asks for one).
+                label: isUnnamed(columnDisplayName(id, key, originalHint, storedLabels)) ? '' : columnDisplayName(id, key, originalHint, storedLabels),
                 hint: usesDefaultHint ? '' : originalHint,
                 originalHint,
                 usesDefaultHint,
@@ -218,7 +226,9 @@ export function validateDrafts(drafts) {
         const seen = new Set();
         for (const column of draft.columns) {
             const label = column.label.trim();
-            if (!label) errors.push({ uid: draft.uid, column: column.uid, message: `「${typeName || '未命名'}」有记录项没有名称` });
+            // Existing items whose name couldn't be derived may stay unnamed; new ones need a name.
+            if (!label && column.isNew) errors.push({ uid: draft.uid, column: column.uid, message: `「${typeName || '未命名'}」有记录项没有名称` });
+            else if (!label) continue;
             else if (seen.has(label)) errors.push({ uid: draft.uid, column: column.uid, message: `「${typeName || '未命名'}」里有两项都叫「${label}」` });
             seen.add(label);
         }
@@ -253,8 +263,9 @@ export function describeChanges(beforeDrafts, afterDrafts, nodeCounts = new Map(
         const nextCols = new Map(draft.columns.map(c => [c.key, c]));
         const added = draft.columns.filter(c => !prevCols.has(c.key));
         const removed = prev.columns.filter(c => !nextCols.has(c.key));
-        if (added.length) lines.push(`新增 ${added.length} 项：${added.map(c => c.label.trim()).join('、')}`);
-        if (removed.length) lines.push(`删除 ${removed.length} 项：${removed.map(c => c.label.trim()).join('、')}（已有内容会保留，只是不再显示和记录）`);
+        const named = (c) => c.label.trim() || UNNAMED;
+        if (added.length) lines.push(`新增 ${added.length} 项：${added.map(named).join('、')}`);
+        if (removed.length) lines.push(`删除 ${removed.length} 项：${removed.map(named).join('、')}（已有内容会保留，只是不再显示和记录）`);
         let renamed = 0;
         let hinted = 0;
         let requiredChanged = 0;

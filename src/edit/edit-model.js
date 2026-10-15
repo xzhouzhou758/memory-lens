@@ -52,8 +52,7 @@ export function isChanged(text, original) {
         && !(toEditText(original) === String(text ?? '').trim());
 }
 
-/** Multi-line editor for long values (event bodies, notes). */
-export function prefersMultiline(key, value) {
-    const text = toEditText(value);
-    return key === 'summary' || text.length > 40 || text.includes('\n');
+/** Text that already has paragraphs (event bodies, multi-line notes): Enter adds a line. */
+export function hasParagraphs(key, text) {
+    return key === 'summary' || String(text ?? '').includes('\n');
 }

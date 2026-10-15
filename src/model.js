@@ -344,9 +344,12 @@ export function buildModel(snapshot = {}) {
     };
 
     const schemaColumns = new Map();
+    const schemaHints = new Map(); // type → { column: instruction for the extractor }
     for (const spec of toArray(snapshot.schema?.types)) {
         const type = str(spec?.type || spec?.id);
-        if (type) schemaColumns.set(type, toArray(spec.tableColumns).map(str).filter(Boolean));
+        if (!type) continue;
+        schemaColumns.set(type, toArray(spec.tableColumns).map(str).filter(Boolean));
+        schemaHints.set(type, spec.columnHints && typeof spec.columnHints === 'object' ? { ...spec.columnHints } : {});
     }
 
     let maxFloor = -1;
@@ -366,6 +369,7 @@ export function buildModel(snapshot = {}) {
         relationCounts: relations,
         injection,
         schemaColumns,
+        schemaHints,
         lastRecall: snapshot.lastRecall || null,
         maxFloor,
     };

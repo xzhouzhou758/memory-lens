@@ -10,7 +10,7 @@
 // duplicate state. If the import path ever moves, `load()` reports a clear
 // error instead of crashing the UI.
 
-import { buildTaskMessages as aiTaskMessages } from './ai/ai-model.js';
+import { buildTaskMessages as aiTaskMessages, rewriteSystemPrompt, rewriteUserPrompt } from './ai/ai-model.js';
 
 const MG_BASE = '/scripts/extensions/memory-graph';
 const CHAT_EVENTS = ['CHAT_CHANGED', 'CHAT_DELETED'];
@@ -313,10 +313,48 @@ function createAiAccess(resolveApi) {
         return info?.hasAvatar ? `character_${info.avatar}` : 'global';
     };
 
+    // One-shot rewrite through the same runner: a single submit tool keeps the
+    // answer clean (no chatter around the text).
+    const SUBMIT_TOOL = {
+        type: 'function',
+        function: {
+            name: 'submit_text',
+            description: 'Submit the rewritten text. Call exactly once.',
+            parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
+        },
+    };
+
     return {
         async check() {
             await loadModules();
             return true;
+        },
+
+        /** @param {{ kind: string, text: string, typeName?: string, itemName?: string, siblings?: string[], instruction?: string, context?: string }} request */
+        async rewrite(request) {
+            const { ctx } = resolveApi();
+            const { main, runner } = await loadModules();
+            const settings = main.getSettings();
+            const result = await runner.requestToolCallsWithRetry(ctx, {
+                toolCallRetryMax: settings?.toolCallRetryMax,
+                rpmLimit: settings?.rpmLimit,
+            }, {
+                taskMessages: [
+                    { role: 'system', content: rewriteSystemPrompt(request.kind) },
+                    { role: 'user', content: rewriteUserPrompt(request) },
+                ],
+                runtimeWorldInfo: null,
+                apiPresetName: String(settings?.requestApiPresetName || '').trim(),
+                llmPresetName: String(settings?.requestLlmPresetName || '').trim(),
+                tools: [SUBMIT_TOOL],
+                allowedNames: ['submit_text'],
+                includeAssistantText: true,
+                allowNoToolCalls: true,
+            });
+            const call = (result?.toolCalls || []).find(c => c?.name === 'submit_text');
+            const text = String(call?.args?.text ?? result?.assistantText ?? '').trim();
+            if (!text) throw new SourceError('ai-empty', 'AI 没有返回内容');
+            return text;
         },
 
         async listSessions() {

@@ -309,6 +309,10 @@ export function createMockAiAccess() {
     });
     return {
         check: async () => true,
+        async rewrite({ text }) {
+            await new Promise(r => setTimeout(r, 500));
+            return `${String(text).replace(/\s+/g, ' ').trim().replace(/[。.]?$/, '')}。`;
+        },
         listSessions: async () => structuredClone(sessions),
         saveSessions: async (list) => { sessions = structuredClone(list); },
         async round({ messages, live, signal }) {

@@ -210,7 +210,11 @@ export function createSchemaView(app, source) {
                 if (label) label.textContent = draft.name.trim() || t('schemaNewType');
             },
         });
-        const intro = autoTextarea({
+        const intro = promptBlock({
+            original: draft.usesDefaultIntro ? draft.originalIntro : '',
+            note: t('aiPromptTypeNote'),
+            compact: true,
+            optimize: () => ({ kind: 'typeIntro', typeName: draft.name, itemName: '', siblings: draft.columns.map(c => c.label).filter(Boolean) }),
             value: draft.intro,
             placeholder: draft.usesDefaultIntro ? t('schemaDefaultHint') : t('schemaIntroPh'),
             label: t('schemaIntroLabel'),
@@ -270,7 +274,7 @@ export function createSchemaView(app, source) {
             type: 'text',
             class: 'ml-schema-input ml-schema-itemname',
             value: column.label,
-            placeholder: t('schemaItemNamePh'),
+            placeholder: column.isNew ? t('schemaItemNamePh') : t('schemaUnnamedPh'),
             'aria-label': t('schemaItemName'),
             'aria-invalid': invalid ? 'true' : null,
             maxlength: 30,
@@ -292,7 +296,10 @@ export function createSchemaView(app, source) {
                 paintEditor();
                 if (openItems.has(column.uid)) requestAnimationFrame(() => editor.querySelector(`[data-uid="${column.uid}"] .ml-schema-itemhint`)?.focus());
             },
-        }, h('span', { class: 'ml-schema-hintbtn-text', text: preview }), icon(open ? 'chevronUp' : 'chevronDown', { size: 13 }));
+        },
+        h('span', { class: 'ml-schema-ai-mark', title: t('aiPromptTag'), 'aria-label': t('aiPromptTag') }, icon('sparkle', { size: 11 })),
+        h('span', { class: 'ml-schema-hintbtn-text', text: open ? t('aiPromptEditing') : preview }),
+        icon(open ? 'chevronUp' : 'chevronDown', { size: 13 }));
         const required = h('button', {
             type: 'button',
             role: 'switch',
@@ -324,19 +331,50 @@ export function createSchemaView(app, source) {
                 toggle,
                 required,
                 iconButton('trash', column.locked ? t('schemaLocked') : t('schemaDeleteItem'), () => removeItem(draft, column), { className: 'ml-iconbtn-sm ml-schema-danger', disabled: column.locked })),
-            open ? autoTextarea({
+            open ? promptBlock({
                 value: column.hint,
+                original: column.usesDefaultHint ? column.originalHint : '',
                 placeholder: column.usesDefaultHint ? t('schemaDefaultHint') : t('schemaItemHintPh'),
                 label: t('schemaItemHint'),
+                note: t('aiPromptItemNote'),
                 className: 'ml-schema-itemhint',
-                onInput: (value) => {
-                    column.hint = value;
-                    const text = row.querySelector('.ml-schema-hintbtn-text');
-                    if (text) text.textContent = value.trim() || (column.usesDefaultHint ? t('schemaDefaultHint') : t('schemaNoHint'));
-                    touched();
-                },
+                optimize: () => ({ kind: 'columnHint', typeName: draft.name, itemName: column.label, siblings: draft.columns.map(c => c.label).filter(Boolean) }),
+                onInput: (value) => { column.hint = value; touched(); },
             }) : null);
         return row;
+    }
+
+    // A "给 AI 的提示" block: tag + note, the text, and AI优化 when available.
+    function promptBlock({ value, original = '', placeholder, label, note, className = '', compact = false, optimize = null, onInput }) {
+        let area = null;
+        const optimizeBtn = aiAccess?.rewrite && optimize
+            ? button(t('aiOptimize'), async () => {
+                const base = area.value.trim() || original;
+                if (!base) return;
+                optimizeBtn.disabled = true;
+                optimizeBtn.classList.add('is-busy');
+                try {
+                    const next = await aiAccess.rewrite({ ...optimize(), text: base });
+                    if (next && next !== area.value) {
+                        area.value = next;
+                        area.dispatchEvent(new Event('input'));
+                        area.focus();
+                    }
+                } catch (err) {
+                    showToast(t('aiFailed', String(err?.message || err)));
+                } finally {
+                    optimizeBtn.disabled = false;
+                    optimizeBtn.classList.remove('is-busy');
+                }
+            }, { iconName: 'sparkle', className: 'ml-btn-sm ml-btn-ghost ml-ai-optimize', title: t('aiOptimizeHint') })
+            : null;
+        area = autoTextarea({ value, placeholder, label, className, onInput });
+        return h('div', { class: `ml-prompt ${compact ? 'is-compact' : ''}`.trim() },
+            h('div', { class: 'ml-prompt-head' },
+                h('span', { class: 'ml-prompt-tag' }, icon('sparkle', { size: 11 }), h('span', { text: t('aiPromptTag') })),
+                h('span', { class: 'ml-prompt-note', text: note }),
+                optimizeBtn),
+            area);
     }
 
     function autoTextarea({ value, placeholder, label, className = '', onInput }) {

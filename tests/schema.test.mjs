@@ -46,7 +46,9 @@ test('column names: built-in translation, then Chinese hint head, then key', () 
     assert.equal(columnDisplayName('character_sheet', 'identity', 'Long-term identity…', {}), '身份');
     assert.equal(columnDisplayName('storyline', 'name', CUSTOM.columnHints.name, {}), '名称');
     assert.equal(columnDisplayName('storyline', 'track', '主线|支线', {}), '主线');
-    assert.equal(columnDisplayName('storyline', 'stage', 'current stage', {}), 'stage');
+    assert.equal(columnDisplayName('storyline', 'stage', 'current stage', {}), '未命名项');
+    assert.equal(columnDisplayName('todo', 'kind', '待办 / 约定 / 誓言 / 系统任务 四选一。', {}), '待办');
+    assert.equal(columnDisplayName('char', 'core_note', '上海半岛酒店半岛套房专属高颜值管家，业务熟练', {}), '上海半岛酒店半岛套房');
     assert.equal(columnDisplayName('storyline', 'stage', 'x', { storyline: { stage: '阶段' } }), '阶段');
 });
 
@@ -151,12 +153,12 @@ test('describeChanges lists changes in plain Chinese', () => {
     const changes = describeChanges(before, after, new Map([['storyline', 4]]));
     const text = JSON.stringify(changes);
     assert.ok(text.includes('新增 1 项：关键人物'));
-    assert.ok(text.includes('删除 1 项：stage'));
+    assert.ok(text.includes('删除 1 项：未命名项'));
     assert.ok(text.includes('关闭「一直让 AI 看到」'));
     assert.ok(text.includes('1 项改了名称'));
     assert.ok(text.includes('新建类型'));
     assert.ok(text.includes('调整了记忆类型的先后顺序'));
-    assert.ok(!/[a-z]{4,}/.test(changes.flatMap(c => c.lines).join('').replace('stage', '')), 'no English words in summary');
+    assert.ok(!/[a-z]{4,}/.test(changes.flatMap(c => c.lines).join('')), 'no English words in summary');
     const removed = describeChanges(before, before.slice(0, 2), new Map([['storyline', 4]]));
     assert.ok(JSON.stringify(removed).includes('当前聊天有 4 条'));
     assert.deepEqual(describeChanges(before, cloneDrafts(before)), []);
