@@ -122,10 +122,10 @@
 .mlens.is-compact .ml-dialog { max-height: 86vh; border-radius: 16px 16px 12px 12px; }
 
 /* Schema editor: one pane at a time (list → editor) */
-.mlens.is-compact .ml-schema-bar { padding: 12px 14px 0; }
-.mlens.is-compact .ml-schema-sub { display: none; }
-.mlens.is-compact .ml-schema-actions { position: sticky; bottom: 0; }
-.mlens.is-compact .ml-schema-state { margin-right: 0; width: 100%; }
+.mlens.is-compact .ml-schema-bar { padding: 8px 12px; gap: 8px; }
+.mlens.is-compact .ml-schema-scope { flex-wrap: wrap; width: 100%; }
+.mlens.is-compact .ml-schema-actions { width: 100%; justify-content: flex-end; }
+.mlens.is-compact .ml-schema-state { margin-right: auto; }
 .mlens.is-compact .ml-schema-list {
     flex: 1 1 auto; width: auto; border-right: 0;
     padding: 12px 14px calc(20px + env(safe-area-inset-bottom));
@@ -136,11 +136,16 @@
 .mlens.is-compact .ml-schema-back { display: inline-flex; }
 .mlens.is-compact .ml-schema.is-pane-editor .ml-schema-list { display: none; }
 .mlens.is-compact .ml-schema.is-pane-editor .ml-schema-editor { display: block; }
-.mlens.is-compact .ml-schema-grip { width: 30px; opacity: 1; }
-.mlens.is-compact .ml-schema-move { opacity: 1; }
-.mlens.is-compact .ml-schema-item { flex-wrap: wrap; }
-.mlens.is-compact .ml-schema-item-side { flex-direction: row; flex-wrap: wrap; width: 100%; justify-content: flex-end; padding-right: 4px; }
-.mlens.is-compact .ml-schema-req { margin-bottom: 0; }
+.mlens.is-compact .ml-schema-grip { width: 28px; height: 36px; opacity: 1; }
+.mlens.is-compact .ml-schema-item-line { flex-wrap: wrap; min-height: 48px; }
+.mlens.is-compact .ml-schema-itemname { flex: 1 1 0; }
+.mlens.is-compact .ml-schema-hintbtn { order: 5; flex-basis: 100%; height: 28px; padding-left: 34px; }
+.mlens.is-compact .ml-schema-itemhint { margin-left: 10px; }
+.mlens.is-compact .ml-schema-req { height: 30px; }
 .mlens.is-compact .ml-schema-flag { padding: 12px; }
 .mlens.is-compact .ml-schema-modal-foot .ml-btn { height: 40px; }
 .mlens.is-compact .ml-schema-toast { left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); transform: none; white-space: normal; }
+/* AI assistant: full-screen sheet over the editor */
+.mlens.is-compact .ml-ai { position: absolute; inset: 0; z-index: 5; border-left: 0; }
+.mlens.is-compact .ml-ai-foot { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+.mlens.is-compact .ml-toast { left: 12px; right: 12px; transform: none; bottom: calc(68px + env(safe-area-inset-bottom)); white-space: normal; }

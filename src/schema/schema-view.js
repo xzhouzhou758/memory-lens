@@ -9,11 +9,12 @@ import { h, clear, put } from '../util.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
 import { typeVisual } from '../model.js';
-import { button, iconButton, emptyState, switchControl } from '../ui/components.js';
+import { button, iconButton, emptyState, segmented } from '../ui/components.js';
 import {
     toDrafts, fromDraft, newColumn, newTypeDraft, labelsFromDrafts, validateDrafts,
     describeChanges, draftsEqual, cloneDrafts,
 } from './schema-model.js';
+import { createAiPanel } from '../ai/ai-panel.js';
 
 const UNDO_MS = 12000;
 
@@ -23,6 +24,10 @@ export function createSchemaView(app, source) {
     const list = h('aside', { class: 'ml-schema-list', 'aria-label': t('schemaTypes') });
     const editor = h('section', { class: 'ml-schema-editor' });
     const body = h('div', { class: 'ml-schema-body' }, list, editor);
+    const aiAccess = source.ai || null;
+    let ai = null;
+    let aiOpen = false;
+    let aiBusy = false;
     const toast = h('div', { class: 'ml-schema-toast', role: 'status', 'aria-live': 'polite', hidden: true });
     const root = h('div', { class: 'ml-schema' }, bar, body, toast);
 
@@ -40,6 +45,7 @@ export function createSchemaView(app, source) {
     let needsReload = true;
     let modal = null;
     let errors = [];
+    const openItems = new Set();
 
     const selected = () => drafts.find(d => d.uid === selectedUid) || null;
     const nodeCount = (id) => app.model()?.typeCounts.get(id) || 0;
@@ -65,6 +71,7 @@ export function createSchemaView(app, source) {
             selectedUid = (drafts.find(d => d.id === keepId) || drafts[0])?.uid || '';
             errors = [];
             status = 'ready';
+            ai?.reset();
         } catch (err) {
             status = err?.code === 'schema-unsupported' ? 'unsupported' : 'error';
             errorText = String(err?.message || err);
@@ -75,6 +82,8 @@ export function createSchemaView(app, source) {
     // ----- Painting -------------------------------------------------------
     function paint() {
         root.classList.toggle('is-pane-editor', pane === 'editor');
+        root.classList.toggle('is-ai-open', aiOpen);
+        root.classList.toggle('is-ai-busy', aiBusy);
         paintBar();
         clear(list);
         clear(editor);
@@ -94,36 +103,41 @@ export function createSchemaView(app, source) {
         paintEditor();
     }
 
+    // One slim row: where it applies (left) · save state + buttons (right).
     function paintBar() {
         clear(bar);
         const dirty = isDirty();
         const statusLine = saving
             ? h('span', { class: 'ml-schema-state', text: t('schemaSaving') })
             : dirty ? h('span', { class: 'ml-schema-state is-dirty' }, h('span', { class: 'ml-schema-dot', 'aria-hidden': 'true' }), h('span', { text: t('schemaUnsaved') })) : null;
+        const charName = info?.characterName || t('schemaNoChar');
         const scope = status === 'ready' && info?.hasCharacter
             ? h('div', { class: 'ml-schema-scope' },
-                switchControl(t('schemaScopeChar', info.characterName || t('schemaNoChar')), scopeCharacter, (value) => {
-                    scopeCharacter = value;
+                h('span', { class: 'ml-schema-scope-label', text: t('schemaScopeLabel') }),
+                segmented([
+                    { value: 'global', label: t('schemaScopeAll') },
+                    { value: 'character', label: t('schemaScopeOnly', charName), title: t('schemaScopeOnly', charName) },
+                ], scopeCharacter ? 'character' : 'global', (value) => {
+                    scopeCharacter = value === 'character';
                     paintBar();
-                }),
-                !scopeCharacter ? h('span', { class: 'ml-schema-scope-note', text: t('schemaScopeGlobalNote') }) : null)
-            : null;
+                }, { ariaLabel: t('schemaScopeLabel'), className: 'ml-seg-sm ml-schema-scope-seg' }),
+                info.scope === 'character' && !scopeCharacter
+                    ? h('span', { class: 'ml-schema-scope-note', text: t('schemaScopeLeaveNote') })
+                    : null,
+                info.scope === 'character' && !dirty
+                    ? h('button', { type: 'button', class: 'ml-linkbtn ml-schema-scope-note', onClick: () => useGlobal() }, h('span', { text: t('schemaUseGlobal') }))
+                    : null)
+            : h('div', { class: 'ml-schema-scope' }, h('span', { class: 'ml-schema-scope-label', text: t('schemaScopeAllOnly') }));
         put(bar,
-            h('div', { class: 'ml-schema-head' },
-                h('h2', { class: 'ml-schema-title', text: t('schemaTitle') }),
-                h('p', { class: 'ml-schema-sub', text: t('schemaIntro') })),
             scope,
             h('div', { class: 'ml-schema-actions' },
                 statusLine,
+                aiAccess && status === 'ready'
+                    ? button(t('aiTitle'), () => toggleAi(), { iconName: 'sparkle', className: `ml-schema-aibtn ${aiOpen ? 'is-on' : ''}`.trim() })
+                    : null,
                 dirty && !saving ? button(t('schemaDiscard'), () => discard(), { className: 'ml-btn-ghost' }) : null,
-                button(t('schemaSave'), () => save(), { iconName: 'check', className: 'ml-btn-primary', disabled: !dirty || saving })),
+                button(t('schemaSave'), () => save(), { iconName: 'check', className: 'ml-btn-primary', disabled: !dirty || saving || aiBusy })),
         );
-        if (status === 'ready' && info?.scope === 'character') {
-            put(bar, h('div', { class: 'ml-schema-banner' },
-                icon('user', { size: 14 }),
-                h('span', { text: t('schemaScopeCharActive', info.characterName) }),
-                h('button', { type: 'button', class: 'ml-linkbtn', onClick: () => useGlobal() }, h('span', { text: t('schemaUseGlobal') }))));
-        }
         if (errors.length) {
             put(bar, h('div', { class: 'ml-schema-errors', role: 'alert' },
                 icon('alert', { size: 14 }),
@@ -198,31 +212,32 @@ export function createSchemaView(app, source) {
         });
         const intro = autoTextarea({
             value: draft.intro,
-            placeholder: draft.usesDefaultIntro ? '沿用默认说明' : t('schemaIntroPh'),
+            placeholder: draft.usesDefaultIntro ? t('schemaDefaultHint') : t('schemaIntroPh'),
             label: t('schemaIntroLabel'),
+            className: 'ml-schema-intro',
             onInput: (value) => { draft.intro = value; touched(); },
         });
-        const items = h('ol', { class: 'ml-schema-items' }, draft.columns.map((column, index) => itemRow(draft, column, index)));
+        const items = h('ol', { class: 'ml-schema-items' }, draft.columns.map(column => itemRow(draft, column)));
         put(editor, h('div', { class: 'ml-schema-editor-inner' },
             h('button', { type: 'button', class: 'ml-schema-back', onClick: () => { pane = 'list'; paint(); } },
                 icon('chevronLeft', { size: 16 }), h('span', { text: t('schemaTypes') })),
             h('div', { class: 'ml-schema-typehead', dataset: { tone: typeVisual(draft.id).tone } },
-                h('span', { class: 'ml-dot', dataset: { tone: typeVisual(draft.id).tone, shape: typeVisual(draft.id).shape }, style: { '--ml-dot-size': '16px' } }),
+                h('span', { class: 'ml-dot', dataset: { tone: typeVisual(draft.id).tone, shape: typeVisual(draft.id).shape }, style: { '--ml-dot-size': '14px' } }),
                 nameInput,
+                h('span', { class: 'ml-schema-usage', text: count ? t('schemaUsage', count) : t('schemaNoUsage') }),
                 draft.deletable ? iconButton('trash', t('schemaDeleteType'), () => deleteType(draft), { className: 'ml-schema-danger' }) : null),
-            h('p', { class: 'ml-schema-usage', text: count ? t('schemaUsage', count) : t('schemaNoUsage') }),
-            h('label', { class: 'ml-schema-field' }, h('span', { class: 'ml-schema-label', text: t('schemaIntroLabel') }), intro),
+            intro,
             h('section', { class: 'ml-schema-section' },
                 h('div', { class: 'ml-section-title' }, h('span', { text: `${t('schemaItems')} · ${draft.columns.length}` })),
                 items,
-                button(t('schemaAddItem'), () => addItem(draft), { iconName: 'plus', className: 'ml-schema-additem' })),
+                button(t('schemaAddItem'), () => addItem(draft), { iconName: 'plus', className: 'ml-btn-ghost ml-schema-additem' })),
             h('section', { class: 'ml-schema-section' },
                 h('div', { class: 'ml-section-title' }, h('span', { text: t('schemaBehavior') })),
                 h('div', { class: 'ml-schema-flags' },
                     flag(draft, 'alwaysInject', t('schemaAlwaysInject'), t('schemaAlwaysInjectHint')),
                     flag(draft, 'latestOnly', t('schemaLatestOnly'), t('schemaLatestOnlyHint')),
                     draft.id === 'event' || draft.compression ? flag(draft, 'compression', t('schemaCompression'), t('schemaCompressionHint')) : null)),
-            h('p', { class: 'ml-schema-note' }, icon('doc', { size: 14 }), h('span', { text: t('schemaRulesNote') })),
+            h('p', { class: 'ml-schema-note', text: t('schemaRulesNote') }),
         ));
         if (draft.isNew && !draft.name) requestAnimationFrame(() => nameInput.focus());
     }
@@ -246,8 +261,11 @@ export function createSchemaView(app, source) {
         return card;
     }
 
-    function itemRow(draft, column, index) {
+    // One line per item: grip · name · hint preview · 必填 · delete.
+    // The hint opens below only when clicked.
+    function itemRow(draft, column) {
         const invalid = errors.some(e => e.column === column.uid);
+        const open = openItems.has(column.uid);
         const nameInput = h('input', {
             type: 'text',
             class: 'ml-schema-input ml-schema-itemname',
@@ -262,26 +280,32 @@ export function createSchemaView(app, source) {
                 touched();
             },
         });
-        const hint = autoTextarea({
-            value: column.hint,
-            placeholder: column.usesDefaultHint ? '沿用默认说明' : t('schemaItemHintPh'),
-            label: t('schemaItemHint'),
-            className: 'ml-schema-itemhint',
-            onInput: (value) => { column.hint = value; touched(); },
-        });
+        const preview = column.hint.trim() || (column.usesDefaultHint ? t('schemaDefaultHint') : t('schemaNoHint'));
+        const toggle = h('button', {
+            type: 'button',
+            class: `ml-schema-hintbtn ${column.hint.trim() ? '' : 'is-empty'}`.trim(),
+            'aria-expanded': String(open),
+            title: t('schemaItemHint'),
+            onClick: () => {
+                if (openItems.has(column.uid)) openItems.delete(column.uid);
+                else openItems.add(column.uid);
+                paintEditor();
+                if (openItems.has(column.uid)) requestAnimationFrame(() => editor.querySelector(`[data-uid="${column.uid}"] .ml-schema-itemhint`)?.focus());
+            },
+        }, h('span', { class: 'ml-schema-hintbtn-text', text: preview }), icon(open ? 'chevronUp' : 'chevronDown', { size: 13 }));
         const required = h('button', {
             type: 'button',
             role: 'switch',
             class: 'ml-schema-req',
             'aria-checked': String(Boolean(column.required)),
             disabled: column.locked,
-            title: column.locked ? t('schemaLocked') : null,
+            title: column.locked ? t('schemaLocked') : t('schemaRequired'),
             onClick: () => {
                 column.required = !column.required;
                 required.setAttribute('aria-checked', String(column.required));
                 touched();
             },
-        }, icon('check', { size: 12 }), h('span', { text: t('schemaRequired') }));
+        }, h('span', { text: t('schemaRequiredShort') }));
         const grip = h('button', {
             type: 'button',
             class: 'ml-schema-grip',
@@ -292,15 +316,26 @@ export function createSchemaView(app, source) {
                 if (event.key === 'ArrowUp') { event.preventDefault(); moveItem(draft, column, -1, true); }
                 if (event.key === 'ArrowDown') { event.preventDefault(); moveItem(draft, column, 1, true); }
             },
-        }, icon('grip', { size: 16 }));
-        const row = h('li', { class: `ml-schema-item ${column.isNew ? 'is-new' : ''}`.trim(), dataset: { uid: column.uid } },
-            grip,
-            h('div', { class: 'ml-schema-item-main' }, nameInput, hint),
-            h('div', { class: 'ml-schema-item-side' },
+        }, icon('grip', { size: 14 }));
+        const row = h('li', { class: `ml-schema-item ${column.isNew ? 'is-new' : ''} ${open ? 'is-open' : ''}`.trim(), dataset: { uid: column.uid } },
+            h('div', { class: 'ml-schema-item-line' },
+                grip,
+                nameInput,
+                toggle,
                 required,
-                iconButton('arrowUp', t('schemaMoveUp'), () => moveItem(draft, column, -1), { className: 'ml-iconbtn-sm ml-schema-move', disabled: index === 0 }),
-                iconButton('arrowDown', t('schemaMoveDown'), () => moveItem(draft, column, 1), { className: 'ml-iconbtn-sm ml-schema-move', disabled: index === draft.columns.length - 1 }),
-                iconButton('trash', column.locked ? t('schemaLocked') : t('schemaDeleteItem'), () => removeItem(draft, column), { className: 'ml-iconbtn-sm ml-schema-danger', disabled: column.locked })));
+                iconButton('trash', column.locked ? t('schemaLocked') : t('schemaDeleteItem'), () => removeItem(draft, column), { className: 'ml-iconbtn-sm ml-schema-danger', disabled: column.locked })),
+            open ? autoTextarea({
+                value: column.hint,
+                placeholder: column.usesDefaultHint ? t('schemaDefaultHint') : t('schemaItemHintPh'),
+                label: t('schemaItemHint'),
+                className: 'ml-schema-itemhint',
+                onInput: (value) => {
+                    column.hint = value;
+                    const text = row.querySelector('.ml-schema-hintbtn-text');
+                    if (text) text.textContent = value.trim() || (column.usesDefaultHint ? t('schemaDefaultHint') : t('schemaNoHint'));
+                    touched();
+                },
+            }) : null);
         return row;
     }
 
@@ -482,6 +517,70 @@ export function createSchemaView(app, source) {
         });
     }
 
+    // ----- AI assistant ---------------------------------------------------
+    function toggleAi() {
+        aiOpen = !aiOpen;
+        if (aiOpen && !ai) {
+            ai = createAiPanel(aiAccess, {
+                getLive: () => drafts.map(fromDraft),
+                applyLive: (types) => applyAiTypes(types),
+                snapshot: () => ({ drafts: cloneDrafts(drafts), selectedUid }),
+                restore: (snap) => {
+                    drafts = cloneDrafts(snap.drafts);
+                    selectedUid = drafts.some(d => d.uid === snap.selectedUid) ? snap.selectedUid : drafts[0]?.uid || '';
+                    errors = [];
+                    paint();
+                },
+                describe: (before, after) => describeChanges(before.drafts, after.drafts, app.model()?.typeCounts || new Map()),
+                onClose: () => toggleAi(),
+                onBusy: (value) => {
+                    aiBusy = value;
+                    root.classList.toggle('is-ai-busy', aiBusy);
+                    paintBar();
+                },
+            });
+            put(body, ai.el);
+        }
+        paint();
+        if (aiOpen) ai.focus();
+    }
+
+    // AI edits arrive as full type specs; turn them back into drafts while
+    // keeping uids, the current selection and every name the user can see.
+    function applyAiTypes(types) {
+        const labels = {};
+        for (const draft of drafts) {
+            for (const column of draft.columns) {
+                if (column.label.trim()) (labels[draft.id] ||= {})[column.key] = column.label.trim();
+            }
+        }
+        const prevById = new Map(drafts.map(d => [d.id, d]));
+        const next = toDrafts(types, labels, info?.defaults || []);
+        for (const draft of next) {
+            const prev = prevById.get(draft.id);
+            if (!prev) {
+                draft.isNew = true;
+                continue;
+            }
+            draft.uid = prev.uid;
+            draft.isNew = prev.isNew;
+            const prevCols = new Map(prev.columns.map(c => [c.key, c]));
+            for (const column of draft.columns) {
+                const old = prevCols.get(column.key);
+                if (old) { column.uid = old.uid; column.isNew = old.isNew; } else column.isNew = true;
+            }
+        }
+        const changed = next.find(d => {
+            const prev = prevById.get(d.id);
+            return !prev || JSON.stringify(fromDraft(prev)) !== JSON.stringify(fromDraft(d));
+        });
+        drafts = next;
+        if (changed) selectedUid = changed.uid;
+        else if (!drafts.some(d => d.uid === selectedUid)) selectedUid = drafts[0]?.uid || '';
+        errors = [];
+        paint();
+    }
+
     // ----- Save / undo ----------------------------------------------------
     function save() {
         if (saving) return;
@@ -624,6 +723,10 @@ export function createSchemaView(app, source) {
                 root.focus?.();
                 return true;
             }
+            if (aiOpen && app.isCompact()) {
+                toggleAi();
+                return true;
+            }
             if (app.isCompact() && pane === 'editor') {
                 pane = 'list';
                 paint();
@@ -633,6 +736,7 @@ export function createSchemaView(app, source) {
         },
         isDirty,
         destroy() {
+            ai?.destroy();
             clearTimeout(undoTimer);
             closeModal();
         },

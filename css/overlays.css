@@ -44,3 +44,42 @@
 .mlens .ml-dialog-title { flex: 1; font-size: 14px; }
 .mlens .ml-dialog-body { display: grid; gap: 18px; padding: 16px 18px 20px; overflow: auto; }
 .mlens .ml-dialog-section .ml-section-title { margin-bottom: 6px; }
+
+/* ---- Inline editing ---- */
+.mlens .ml-editable[data-editable="true"] { cursor: text; border-radius: var(--ml-radius-sm); transition: background var(--ml-dur), box-shadow var(--ml-dur); }
+.mlens .ml-editable[data-editable="true"]:hover { background: var(--ml-hover); box-shadow: 0 0 0 3px var(--ml-hover); }
+.mlens .ml-editable[data-editable="true"]:focus-visible { outline: 2px solid var(--ml-accent); outline-offset: 2px; }
+.mlens dd.ml-editable.is-empty { color: var(--ml-text-faint); font-style: normal; }
+.mlens .ml-inline { display: inline-flex; flex-direction: column; gap: 3px; width: 100%; vertical-align: top; }
+.mlens .ml-inline-input {
+    width: 100%; min-width: 120px;
+    border: 1px solid var(--ml-accent); border-radius: var(--ml-radius-sm);
+    background: var(--ml-surface); color: var(--ml-text);
+    font: inherit; font-size: inherit; font-weight: inherit; line-height: 1.55;
+    padding: 4px 8px; outline: none; resize: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ml-accent) 18%, transparent);
+}
+.mlens .ml-inline-input.is-multi { min-height: 64px; overflow: auto; font-size: 13px; font-weight: 400; }
+.mlens .ml-inline-hint { font-size: 11px; font-weight: 400; color: var(--ml-text-faint); }
+.mlens .ml-table td > .ml-inline { min-width: 180px; }
+
+/* ---- Shared bottom toast (edit saved / undo) ---- */
+.mlens .ml-toast {
+    position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+    z-index: 40;
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-radius: var(--ml-radius);
+    background: var(--ml-raised); border: 1px solid var(--ml-border-strong);
+    box-shadow: var(--ml-shadow-2);
+    font-size: 13px; white-space: nowrap;
+    animation: ml-enter 180ms var(--ml-ease);
+}
+.mlens .ml-toast[hidden] { display: none; }
+.mlens .ml-toast svg { color: var(--ml-accent); flex: none; }
+.mlens .ml-toast.is-error svg { color: var(--ml-danger); }
+.mlens .ml-toast-btn {
+    display: flex; align-items: center; gap: 5px;
+    border: 0; background: none; cursor: pointer;
+    color: var(--ml-accent); font-size: 13px; font-weight: 600; padding: 0 4px; margin-left: 4px;
+}
+.mlens .ml-toast-btn:hover { text-decoration: underline; }

@@ -1,22 +1,22 @@
 # CLAUDE.md — Memory Lens（记忆透镜）
 
 Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-graph` 扩展做的可视化工作台。
-仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.2.0。
+仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.3.0。
 
 ## 用户的硬性要求（必须遵守）
 
 1. **全中文界面**：用户能看到的文字不出现英文（快捷键名 Ctrl/K/Esc 除外）。Luker 默认 schema 里的英文 label / 说明不显示，在编辑器里显示为“沿用默认说明”。
 2. **简单友好**：用户明确说过“不要整的那么复杂”。不暴露技术参数（主键、向量化、压缩阈值、提取指令等），由代码自动处理或原样保留。
 3. **绝不照搬 yuzuki-Memory**（github.com/gaigai315/yuzuki-Memory，无许可证）。不复制其代码、CSS、类名、配色、图标、插画。本项目风格：石墨灰中性色、青绿强调色 `#3fd0b4`、琥珀 `#f4b740` = 本轮召回、蓝色 = 常驻注入、手写 SVG 图标、无毛玻璃渐变、无环形自我中心图。
-4. 记忆**内容**只读（编辑跳原生面板）；只有**记忆结构（schema）**可在本扩展中编辑。
+4. 记忆内容可在数据表 / 详情栏**双击修改**（用户 2026-10 要求，取代原先的“只读”规则）；新建、删除记忆和改关系仍去原生面板。
 5. 回复用户用中文。
 
 ## 命令
 
 ```bash
-npm test                      # node:test，无依赖，Node ≥ 20（当前 28 个用例）
+npm test                      # node:test，无依赖，Node ≥ 20（当前 38 个用例）
 npm run preview               # http://127.0.0.1:4173/preview/index.html 示例数据
-# 预览参数：?data=demo|large|empty|error  &theme=dark|light  &n=800
+# 预览参数：?data=demo|large|empty|error  &theme=dark|light  &view=graph|timeline|table|schema  &n=800
 ```
 
 预览需要 Luker 的 `public/lib/cytoscape.min.js`：`preview/serve.mjs` 会依次查找 `--cytoscape <file>`、`$LUKER_DIR`、上级 Luker 目录。找不到时图谱为空，其他视图正常。
@@ -36,9 +36,11 @@ src/graph/             cytoscape 加载、样式（读 CSS 变量）、力导向
 src/views/             graph / timeline / table 三个只读视图
 src/panels/            sidebar 筛选、inspector 详情、palette 搜索、dialog
 src/schema/            schema-model.js（纯函数）+ schema-view.js（记忆结构编辑器 UI）
+src/edit/              edit-model.js（纯函数：可改规则、值转换）+ inline-edit.js（双击原地编辑）
+src/ai/                ai-model.js（纯函数：对话循环、历史回放）+ ai-panel.js（记忆结构页右侧的 AI 助手）
 css/                   tokens → shell → … → schema → compact（≤860px 移动布局，最后加载）
 preview/               独立预览：mock-data.js（原创虚构“雾港”故事 + 模拟 schema 读写）、serve.mjs
-tests/                 model.test.mjs、schema.test.mjs
+tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.test.mjs
 ```
 
 视图接口：`{ id, el, render(), onShow?(), invalidate?(), onSelectionChange?(), destroy?() }`。schema 视图是“全宽视图”（`isFullView`），隐藏侧栏和详情栏，无聊天时也能打开。
@@ -73,12 +75,28 @@ tests/                 model.test.mjs、schema.test.mjs
 
 ## 记忆结构编辑器的设计决定
 
-- 一行一个记录项：名称 / 说明 / 必须填写 / 排序（拖动或上下按钮）/ 删除。三个开关：一直让 AI 看到（alwaysInject）、同名只保留最新（latestOnly）、自动合并成摘要（compression.mode，只在 event 或已开启时显示）。
+- 顶部只有一行细栏：「用于：所有角色 | 仅某角色」分段按钮 + 保存。
+- 一行一个记录项：拖动 / 名称 / 说明预览（点开才编辑）/ 必填 / 删除；键盘在拖动柄上用 ↑↓ 排序。三个开关：一直让 AI 看到（alwaysInject）、同名只保留最新（latestOnly）、自动合并成摘要（compression.mode，只在 event 或已开启时显示）。
 - 不暴露、原样保留：`extractionInstructions`、`compression.summarizeInstruction`、压缩数值、`keywords`、`ragPerTypeK`、`tableName`、`level` 等。
 - 主键：latestOnly 开启且无主键时自动选 title/name/aliases；新建项默认加入向量检索列。
 - 字段显示名优先级：用户命名 > 内置翻译表 > 说明的第一个中文短语（≤12 字）> key。
 - 保存前弹窗列出中文改动摘要（`describeChanges`），保存后 12 秒内可撤销。
 - 允许类型重名（用户的自定义“剧情线”和内置 thread 都叫“剧情线”）。
+
+## AI 助手（替代原生「AI 迭代 Schema」的前端）
+
+- 原生工作室的对话循环、提案总线都在 `openSchemaIterationStudio` 闭包里，没导出，所以**流程是我们自己串的**（source-luker.js `createAiAccess` + ai-model.js `runTurn`）。复用的导出：`schema-iteration/tools.js`（`buildToolCatalog`、`normalizeToolCallToEdit` 沙盒）、`read-fields-dispatcher.js`、`system-prompt.js`、`/scripts/iteration-library/runner.js` 的 `requestToolCallsWithRetry`。模型用 memory-graph 设置里的 `requestApiPresetName` / `requestLlmPresetName`。
+- AI 的修改只进编辑器草稿（未保存），用户点「保存」才走原有的保存 / 撤销流程。每轮有中文改动摘要和「撤销这一轮」（连带撤销之后的轮次）。AI 工作时编辑器和保存按钮锁定。
+- 不提供 reset_to_blank / reset_to_global 控制工具，不接世界书读取工具（首版从简）。系统提示词后追加中文回复要求（`LANGUAGE_NOTE`）。
+- 会话存 `extensionSettings.memory_lens.aiSessions[scopeKey]`，scopeKey = `character_<avatar>` 或 `global`，最多 12 条；与原生工作室的历史互不相通。
+- **未在真实 Luker + 真实模型上测过**，只在 preview 的 `createMockAiAccess` 上测过。
+
+## 双击修改记忆内容
+
+- 交互：`src/edit/inline-edit.js` 的 `editable(el, {app, node, key, value})`；key '' = 节点标题。单行 Enter 保存，多行（正文、长文本）Ctrl/⌘+Enter；Esc 取消；点别处保存。保存后底部提示可撤销（10 秒）。编辑中实时刷新会推迟。
+- 规则（`edit-model.js`）：自动合并摘要（rollup）、已归档不可改；事件标题自动生成不可改（改正文）。数组字段用「、」拆合，保持原类型。
+- 写入（source-luker.js `createEditAccess`）：照 memory-graph 图谱迭代工作室的手动编辑路径——`ensureStoreSyncedWithChat` → 副本上 `getMemoryGraphWriteApi(..., {useInFlightAnchor:false, preserveSeqOnEdit:true}).editNode` → `commitGraphUiMutation` → `syncGraphVectorsAfterMutation`。内部函数不在时退回公开的 `openSession(ctx).editNode`（会推进 seqTo）。
+- **未在真实 Luker 中测过**，只在 preview 的 `createMockEditAccess` 上测过。
 
 ## 待办 / 可能的下一步
 

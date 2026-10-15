@@ -4,6 +4,7 @@
 // sticky header. Desktop shows real tables; narrow screens switch to cards
 // via CSS (each cell carries a data-label).
 
+import { editable } from '../edit/inline-edit.js';
 import { h, clear, truncate, put } from '../util.js';
 import { icon } from '../icons.js';
 import { t, typeLabel, fieldLabel, depthLabel } from '../i18n.js';
@@ -112,12 +113,17 @@ export function createTableView(app) {
                 },
             },
             h('td', { class: 'ml-td-title', 'data-label': t('title') },
-                h('span', { class: 'ml-td-title-inner' }, typeDot(node.type, { size: 8 }), h('span', { text: node.title }), node.isRollup ? h('span', { class: 'ml-tl-tag', text: depthLabel(node.depth) }) : null)),
+                h('span', { class: 'ml-td-title-inner' }, typeDot(node.type, { size: 8 }),
+                    isEvent ? h('span', { text: node.title }) : editable(h('span', { text: node.title }), node.fields.title !== undefined
+                        ? { app, node, key: 'title', value: node.fields.title, label: t('title') }
+                        : { app, node, key: '', value: node.rawTitle || node.title, label: t('title') }),
+                    node.isRollup ? h('span', { class: 'ml-tl-tag', text: depthLabel(node.depth) }) : null)),
             cols.map(col => {
                 const value = isEvent && col === 'summary'
                     ? (node.parsed?.prose[0] || node.summaryText)
                     : fieldText(node.fields[col]);
-                return h('td', { 'data-label': fieldLabel(col, activeType), class: value ? null : 'is-empty', text: value ? truncate(value, isEvent ? 160 : 90) : '—' });
+                return editable(h('td', { 'data-label': fieldLabel(col, activeType), class: value ? null : 'is-empty', text: value ? truncate(value, isEvent ? 160 : 90) : '—' }),
+                    { app, node, key: col, value: node.fields[col], label: fieldLabel(col, activeType) });
             }),
             h('td', { class: 'ml-td-num', 'data-label': isEvent ? t('floor') : t('degree'), text: isEvent ? (formatFloor(node) || '—') : String(node.degree) }),
             h('td', { class: 'ml-td-ctx' }, contextBadge(ctx)));

@@ -299,3 +299,84 @@ export function createLargeSnapshot(count = 600) {
     }
     return base;
 }
+
+/** Scripted stand-in for the AI schema assistant (preview only, no network). */
+export function createMockAiAccess() {
+    let sessions = [];
+    const wait = (ms, signal) => new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener('abort', () => { clearTimeout(timer); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); });
+    });
+    return {
+        check: async () => true,
+        listSessions: async () => structuredClone(sessions),
+        saveSessions: async (list) => { sessions = structuredClone(list); },
+        async round({ messages, live, signal }) {
+            await wait(700, signal);
+            const last = messages[messages.length - 1];
+            // Second round of a turn: the previous message was our tool call.
+            if (last.role === 'assistant') {
+                return { assistantText: '改好了，已经放进左边的编辑器，你检查一下，没问题就点「保存」。', calls: [], live };
+            }
+            const text = String(last.content || '');
+            const next = structuredClone(live);
+            if (/物品|道具/.test(text) && !next.some(t => t.id === 'item')) {
+                const spec = {
+                    id: 'item', label: '物品', tableColumns: ['title', 'owner', 'state'],
+                    columnHints: { title: '物品名称', owner: '现在在谁手里', state: '当前状态：完好 / 损坏 / 遗失' },
+                    requiredColumns: ['title'], latestOnly: true, primaryKeyColumns: ['title'],
+                    extractHint: '故事里反复出现、会影响剧情的物品。',
+                };
+                next.push(spec);
+                return { assistantText: '', calls: [{ id: `mock_${Date.now()}`, name: 'mg_schema_set_node_type', args: spec, result: { status: 'applied' }, ok: true }], live: next };
+            }
+            const target = next.find(t => t.id !== 'event') || next[0];
+            const key = (target.tableColumns || [])[1] || target.tableColumns[0];
+            target.columnHints = { ...(target.columnHints || {}), [key]: '写清楚、写简短，一句话即可。' };
+            return {
+                assistantText: '',
+                calls: [
+                    { id: `mock_r_${Date.now()}`, name: 'mg_schema_read_fields', args: { paths: ['[0].tableColumns'] }, result: {}, ok: true },
+                    { id: `mock_${Date.now()}`, name: 'mg_schema_set_node_type', args: { id: target.id, label: target.label }, result: { status: 'applied' }, ok: true },
+                ],
+                live: next,
+            };
+        },
+    };
+}
+
+/**
+ * In-memory node editing for the preview. Patches survive reloads by being
+ * applied on top of every fresh snapshot.
+ */
+export function createMockEditAccess(onChange) {
+    const patches = new Map(); // id → { fields: {}, title? }
+    return {
+        apply(snapshot) {
+            for (const node of snapshot.nodes) {
+                const patch = patches.get(node.id);
+                if (!patch) continue;
+                node.fields = { ...(node.fields || {}), ...patch.fields };
+                if (patch.title !== undefined) node.title = patch.title;
+            }
+            return snapshot;
+        },
+        async updateNode(node, { fields = {}, title } = {}) {
+            await new Promise(r => setTimeout(r, 80));
+            const prev = structuredClone(patches.get(node.id) || null);
+            const current = patches.get(node.id) || { fields: {} };
+            const previous = { id: node.id, patch: prev, fields: {}, title: undefined };
+            for (const key of Object.keys(fields)) previous.fields[key] = node.fields?.[key];
+            current.fields = { ...current.fields, ...fields };
+            if (title !== undefined) current.title = title;
+            patches.set(node.id, current);
+            onChange?.();
+            return previous;
+        },
+        async restore(previous) {
+            if (previous.patch) patches.set(previous.id, previous.patch);
+            else patches.delete(previous.id);
+            onChange?.();
+        },
+    };
+}

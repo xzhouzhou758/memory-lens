@@ -9,6 +9,7 @@ import { icon } from '../icons.js';
 import { t, typeLabel, relationLabel, fieldLabel, depthLabel } from '../i18n.js';
 import { neighborsOf, entitiesOfEvent, contextState, formatFloor, fieldText, compareTimeline, typeVisual } from '../model.js';
 import { iconButton, nodeLink, contextBadge, sectionTitle, typeChip, emptyState, button } from '../ui/components.js';
+import { editable } from '../edit/inline-edit.js';
 
 export function createInspector(app) {
     const body = h('div', { class: 'ml-inspector-body' });
@@ -37,7 +38,8 @@ export function createInspector(app) {
                     parsed.time ? h('div', { class: 'ml-insp-anchor' }, icon('clock', { size: 14 }), h('span', { class: 'ml-insp-anchor-label', text: t('time') }), h('span', { text: parsed.time })) : null,
                     parsed.place ? h('div', { class: 'ml-insp-anchor' }, icon('mapPin', { size: 14 }), h('span', { class: 'ml-insp-anchor-label', text: t('place') }), h('span', { text: parsed.place })) : null)
                 : null,
-            parsed.prose.length ? h('div', { class: 'ml-insp-prose' }, parsed.prose.map(p => h('p', { text: p }))) : null,
+            editable(h('div', { class: 'ml-insp-prose' }, parsed.prose.length ? parsed.prose.map(p => h('p', { text: p })) : h('p', { class: 'ml-insp-muted', text: t('empty') })),
+                { app, node, key: 'summary', value: node.fields.summary ?? node.summaryText, label: fieldLabel('summary', node.type) }),
             parsed.irreversible.length
                 ? h('section', { class: 'ml-insp-callout', dataset: { kind: 'irreversible' } },
                     h('div', { class: 'ml-insp-callout-title' }, icon('bolt', { size: 14 }), h('span', { text: t('irreversible') })),
@@ -70,8 +72,9 @@ export function createInspector(app) {
 
     function entityBody(model, node) {
         const columns = model.schemaColumns.get(node.type) || Object.keys(node.fields);
+        const editing = app.canEdit();
         const keys = [...new Set([...columns, ...Object.keys(node.fields)])]
-            .filter(key => key !== 'title' && fieldText(node.fields[key]).trim());
+            .filter(key => key !== 'title' && (fieldText(node.fields[key]).trim() || (editing && columns.includes(key))));
         const groups = new Map();
         const events = [];
         for (const item of neighborsOf(model, node.id)) {
@@ -87,7 +90,8 @@ export function createInspector(app) {
         const fieldList = keys.length
             ? h('dl', { class: 'ml-insp-fields' }, keys.map(key => [
                 h('dt', { text: fieldLabel(key, node.type) }),
-                h('dd', { text: fieldText(node.fields[key]) }),
+                editable(h('dd', { class: fieldText(node.fields[key]).trim() ? null : 'is-empty', text: fieldText(node.fields[key]) || t('editEmpty') }),
+                    { app, node, key, value: node.fields[key], label: fieldLabel(key, node.type) }),
             ]))
             : null;
         const relationBlocks = [...groups.entries()].map(([type, items]) => h('div', { class: 'ml-insp-relgroup', dataset: { category: items[0].edge.category } },
@@ -160,7 +164,9 @@ export function createInspector(app) {
                 h('span', { class: 'ml-spacer' }),
                 iconButton('crosshair', t('locate'), () => app.locate(node.id), { className: 'ml-iconbtn-sm' }),
                 iconButton('x', t('close'), () => select(''), { className: 'ml-iconbtn-sm ml-insp-close' })),
-            h('h2', { class: 'ml-insp-title', text: node.title }),
+            node.type !== 'event' && node.fields.title !== undefined
+                ? editable(h('h2', { class: 'ml-insp-title', text: node.title }), { app, node, key: 'title', value: node.fields.title, label: t('title') })
+                : editable(h('h2', { class: 'ml-insp-title', text: node.title }), { app, node, key: '', value: node.rawTitle || node.title, label: t('title') }),
             h('div', { class: 'ml-insp-meta' },
                 contextBadge(ctx),
                 formatFloor(node) ? h('span', { class: 'ml-chip' }, icon('clock', { size: 12 }), h('span', { text: formatFloor(node) })) : null,

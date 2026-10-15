@@ -18,6 +18,7 @@ const PATHS = {
     chevronLeft: 'M15 6l-6 6 6 6',
     chevronRight: 'M9 6l6 6-6 6',
     chevronDown: 'M6 9l6 6 6-6',
+    chevronUp: 'M6 15l6-6 6 6',
     arrowLeft: 'M19 12H5M11 6l-6 6 6 6',
     arrowRight: 'M5 12h14M13 6l6 6-6 6',
     copy: 'M9 9h11v11H9zM5 15H4V4h11v1',

@@ -10,6 +10,8 @@
 // duplicate state. If the import path ever moves, `load()` reports a clear
 // error instead of crashing the UI.
 
+import { buildTaskMessages as aiTaskMessages } from './ai/ai-model.js';
+
 const MG_BASE = '/scripts/extensions/memory-graph';
 const CHAT_EVENTS = ['CHAT_CHANGED', 'CHAT_DELETED'];
 const MESSAGE_EVENTS = ['MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_EDITED'];
@@ -162,6 +164,239 @@ export function createLukerSource() {
         },
 
         schema: createSchemaAccess(resolveApi),
+        ai: createAiAccess(resolveApi),
+        edit: createEditAccess(resolveApi),
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Editing stored memories
+// ---------------------------------------------------------------------------
+//
+// Mirrors memory-graph's own manual-edit commit (as used by its graph
+// iteration studio): edit a copy of the live store with the write-api
+// (preserveSeqOnEdit, so the node keeps its place on the timeline), commit it
+// through commitGraphUiMutation (persists + fires onStoreCommit), then
+// re-sync vectors. Falls back to the public openSession().editNode if those
+// internals ever move. Undo writes the previous values back the same way.
+
+function createEditAccess(resolveApi) {
+    let internals = null;
+    const loadInternals = async () => {
+        if (!internals) {
+            internals = Promise.all([import(`${MG_BASE}/main.js`), import(`${MG_BASE}/write-api.js`)])
+                .then(([main, write]) => ({ main, write }))
+                .catch(() => ({ main: {}, write: {} }));
+        }
+        return internals;
+    };
+    const split = (fields) => {
+        const setFields = {};
+        const clearFields = [];
+        for (const [key, value] of Object.entries(fields || {})) {
+            const empty = value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length);
+            if (empty) clearFields.push(key);
+            else setFields[key] = value;
+        }
+        return { setFields, clearFields };
+    };
+    const check = (result) => {
+        if (result && result.ok === false) throw new SourceError('write-failed', result.error?.message || result.error?.code || 'edit failed');
+        return result;
+    };
+    const run = async (id, fields, title) => {
+        const { ctx, api: mg } = resolveApi();
+        const { main, write } = await loadInternals();
+        const op = { id, ...split(fields), ...(title !== undefined ? { title } : {}) };
+        const manual = ['ensureStoreSyncedWithChat', 'commitGraphUiMutation', 'getChatKey'].every(k => typeof main[k] === 'function')
+            && typeof write.getMemoryGraphWriteApi === 'function';
+        if (manual) {
+            const live = await main.ensureStoreSyncedWithChat(ctx);
+            const chatKey = String(main.getChatKey(ctx) || '').trim();
+            if (!live || !chatKey) throw new SourceError('no-chat');
+            const working = structuredClone(live);
+            const api = write.getMemoryGraphWriteApi(working, ctx, { onCommit: null, useInFlightAnchor: false, preserveSeqOnEdit: true });
+            const result = check(await api.editNode(op));
+            if (result?.changed === false) return result;
+            await main.commitGraphUiMutation(ctx, chatKey, { beforeStore: live, afterStore: working, replaceGraph: false, seq: null });
+            try { await main.syncGraphVectorsAfterMutation?.(ctx, chatKey, working); } catch (err) { console.warn('[memory-lens] vector sync after edit failed', err); }
+            return result;
+        }
+        if (typeof mg.openSession !== 'function') throw new SourceError('edit-unsupported');
+        const session = await mg.openSession(ctx);
+        if (!session || typeof session.editNode !== 'function') throw new SourceError('edit-unsupported');
+        return check(await session.editNode(op));
+    };
+    return {
+        /**
+         * @param {object} node model node
+         * @param {{ fields?: object, title?: string }} patch
+         * @returns previous values, for restore()
+         */
+        async updateNode(node, { fields = {}, title } = {}) {
+            const previous = { id: node.id, fields: {}, title: undefined };
+            for (const key of Object.keys(fields)) previous.fields[key] = structuredClone(node.fields?.[key] ?? null);
+            if (title !== undefined) previous.title = node.rawTitle || '';
+            await run(node.id, fields, title);
+            return previous;
+        },
+        async restore(previous) {
+            await run(previous.id, previous.fields, previous.title);
+        },
+    };
+}
+
+// ---------------------------------------------------------------------------
+// AI schema assistant
+// ---------------------------------------------------------------------------
+//
+// Reuses memory-graph's exported pieces: the tool catalog + sandbox
+// (schema-iteration/tools.js), the read tool dispatcher, the default system
+// prompt and Luker's tool-calling runner. The turn loop and the UI are ours.
+// Edits land in the structure editor as unsaved drafts; nothing is written
+// until the user presses 保存 there. Sessions live in our own settings key.
+
+const ITER_BASE = `${MG_BASE}/schema-iteration`;
+const SCHEMA_READ_TOOL = {
+    type: 'function',
+    function: {
+        name: 'mg_schema_read_fields',
+        description: 'Read exact values from the current working MG node-type schema by lodash-style paths. Read-only. The root is the schema array; common paths: "[N].id", "[N].label", "[N].tableColumns", "[N].columnHints", "[N].extractionInstructions", "[N].compression.mode", "length". Prefer specific indexed paths.',
+        parameters: {
+            type: 'object',
+            properties: { paths: { type: 'array', items: { type: 'string' }, description: 'Lodash-style paths into the schema array.' } },
+            required: ['paths'],
+            additionalProperties: false,
+        },
+    },
+};
+const LANGUAGE_NOTE = [
+    '',
+    '# Working mode',
+    'Your edits go into a working draft that the user reviews in a visual editor and saves themselves; do not ask them to confirm each step.',
+    'Always reply to the user in Simplified Chinese, in short plain sentences. Avoid technical field names (tableColumns, primaryKeyColumns…) in replies; describe changes by their display names.',
+    'Write label and columnHints values in Simplified Chinese unless the user asks otherwise. Keep existing column keys unchanged; new column keys must be snake_case ASCII.',
+].join('\n');
+
+function createAiAccess(resolveApi) {
+    let modules = null;
+    const loadModules = async () => {
+        if (!modules) {
+            modules = Promise.all([
+                import(`${MG_BASE}/main.js`),
+                import(`${MG_BASE}/character-overrides.js`),
+                import(`${ITER_BASE}/tools.js`),
+                import(`${ITER_BASE}/system-prompt.js`),
+                import(`${ITER_BASE}/read-fields-dispatcher.js`),
+                import('/scripts/iteration-library/runner.js'),
+            ]).then(([main, overrides, tools, prompt, readFields, runner]) => {
+                const needed = [main.getSettings, main.normalizeNodeTypeSchema, tools.buildToolCatalog, tools.normalizeToolCallToEdit,
+                    readFields.dispatchMgSchemaReadFields, runner.requestToolCallsWithRetry];
+                if (needed.some(fn => typeof fn !== 'function')) throw new SourceError('ai-unsupported');
+                return { main, overrides, tools, prompt, readFields, runner };
+            }).catch((err) => {
+                modules = null;
+                throw err instanceof SourceError ? err : new SourceError('ai-unsupported', String(err?.message || err));
+            });
+        }
+        return modules;
+    };
+
+    const bucket = (ctx) => {
+        const all = ctx.extensionSettings || {};
+        all[LABEL_KEY] ||= {};
+        all[LABEL_KEY].aiSessions ||= {};
+        return all[LABEL_KEY].aiSessions;
+    };
+    const scopeKey = (ctx, main, mg) => {
+        const info = mg.getSchemaScopeInfo?.(ctx, main.getSettings());
+        return info?.hasAvatar ? `character_${info.avatar}` : 'global';
+    };
+
+    return {
+        async check() {
+            await loadModules();
+            return true;
+        },
+
+        async listSessions() {
+            const { ctx, api: mg } = resolveApi();
+            const { main } = await loadModules();
+            return structuredClone(bucket(ctx)[scopeKey(ctx, main, mg)] || []);
+        },
+
+        async saveSessions(list) {
+            const { ctx, api: mg } = resolveApi();
+            const { main } = await loadModules();
+            bucket(ctx)[scopeKey(ctx, main, mg)] = structuredClone(list);
+            ctx.saveSettingsDebounced?.();
+        },
+
+        /**
+         * One model round. Read tools run against `live`; edit tools run in
+         * memory-graph's sandbox and chain onto `live`.
+         */
+        async round({ messages, live, signal }) {
+            const { ctx } = resolveApi();
+            const { main, overrides, tools, prompt, readFields, runner } = await loadModules();
+            const settings = main.getSettings();
+            const effective = (typeof overrides.getEffectiveSettings === 'function' ? overrides.getEffectiveSettings(ctx, settings) : null) || settings;
+            const basePrompt = String(effective?.schemaIterSystemPrompt || '').trim() || prompt.DEFAULT_SCHEMA_ITER_SYSTEM_PROMPT || '';
+            const control = new Set(Object.values(tools.CONTROL_TOOL_NAMES || {}));
+            const catalog = [...tools.buildToolCatalog().filter(def => !control.has(def?.function?.name)), SCHEMA_READ_TOOL];
+            const result = await runner.requestToolCallsWithRetry(ctx, {
+                toolCallRetryMax: settings?.toolCallRetryMax,
+                rpmLimit: settings?.rpmLimit,
+            }, {
+                taskMessages: aiTaskMessages(`${basePrompt}${LANGUAGE_NOTE}`, messages),
+                runtimeWorldInfo: null,
+                apiPresetName: String(settings?.requestApiPresetName || '').trim(),
+                llmPresetName: String(settings?.requestLlmPresetName || '').trim(),
+                tools: catalog,
+                abortSignal: signal,
+                includeAssistantText: true,
+                allowNoToolCalls: true,
+            });
+            let current = live;
+            const calls = [];
+            for (const raw of Array.isArray(result?.toolCalls) ? result.toolCalls : []) {
+                const name = String(raw?.name || '');
+                if (control.has(name)) continue;
+                const args = raw?.args && typeof raw.args === 'object' ? raw.args : {};
+                const id = String(raw?.id || '') || `ml_call_${Date.now().toString(36)}_${calls.length}`;
+                let content;
+                let ok = true;
+                try {
+                    if (name === SCHEMA_READ_TOOL.function.name) {
+                        content = await readFields.dispatchMgSchemaReadFields({ liveSchema: current, args });
+                    } else {
+                        const edits = await tools.normalizeToolCallToEdit(
+                            { function: { name, arguments: JSON.stringify(args) } },
+                            { live: current, normalizeNodeTypeSchema: main.normalizeNodeTypeSchema },
+                        );
+                        if (edits?.length) {
+                            current = edits[edits.length - 1].newValue;
+                            content = { status: 'applied', message: 'Applied to the working draft. The user reviews and saves it.' };
+                        } else {
+                            ok = false;
+                            content = { status: 'noop', message: 'No change produced; the schema already matches. Re-read before retrying.' };
+                        }
+                    }
+                } catch (err) {
+                    ok = false;
+                    content = { error: String(err?.message || err || 'failed') };
+                }
+                calls.push({ id, name, args, result: content, ok });
+            }
+            return {
+                assistantText: String(result?.assistantText || ''),
+                reasoning: String(result?.reasoning || ''),
+                reasoningBlocks: result?.reasoningBlocks || null,
+                reasoningDetails: result?.reasoningDetails || null,
+                calls,
+                live: current,
+            };
+        },
     };
 }
 

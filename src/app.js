@@ -20,8 +20,11 @@ import { iconButton, segmented, emptyState, button, kbd } from './ui/components.
 import { createSchemaView } from './schema/schema-view.js';
 import { buildLabelMaps } from './schema/schema-model.js';
 import { setDisplayLabels } from './i18n.js';
+import { fromEditText } from './edit/edit-model.js';
+import { isEditing } from './edit/inline-edit.js';
 
 const COMPACT_QUERY = '(max-width: 860px)';
+const EDIT_UNDO_MS = 10000;
 const ERROR_KEYS = { 'no-host': 'errNoHost', 'no-extension': 'errNoExtension', 'no-chat': 'errNoChat', api: 'errApi' };
 
 function detectTheme() {
@@ -95,6 +98,36 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
             store.set({ theme: store.get().theme === 'dark' ? 'light' : 'dark' });
         },
         reload: () => load({ manual: true }),
+        canEdit: () => Boolean(source.edit),
+        notify: (text) => showToast(text),
+        /** Saves one edited value; key '' = title. Offers 撤销 afterwards. */
+        async editNode(node, key, text, original) {
+            if (!source.edit) return;
+            const value = key === '' ? String(text).trim() : fromEditText(text, original);
+            // An entity's 'title' column is its name; keep the node title in step.
+            const patch = key === '' ? { title: value }
+                : key === 'title' && String(value).trim() ? { fields: { title: value }, title: String(value).trim() }
+                    : { fields: { [key]: value } };
+            try {
+                const previous = await source.edit.updateNode(node, patch);
+                showToast(t('editSaved'), {
+                    action: t('schemaUndo'),
+                    onAction: async () => {
+                        try {
+                            await source.edit.restore(previous);
+                            showToast(t('schemaUndone'));
+                        } catch (err) {
+                            showToast(t('editFailed', String(err?.message || err)), { error: true });
+                        }
+                        scheduleReload();
+                    },
+                    duration: EDIT_UNDO_MS,
+                });
+            } catch (err) {
+                showToast(t('editFailed', String(err?.message || err)), { error: true });
+            }
+            scheduleReload();
+        },
         showInjection() {
             const recall = model?.lastRecall;
             dialog.open(`${t('injectionText')}${recall?.at ? ` · ${formatTime(recall.at)}` : ''}`, [
@@ -143,7 +176,20 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
     const scrim = h('div', { class: 'ml-scrim', onClick: () => store.set({ drawer: '' }) });
     const bottomNav = h('nav', { class: 'ml-bottomnav', 'aria-label': t('display') });
     const body = h('div', { class: 'ml-body' }, sidebar.el, h('div', { class: 'ml-stagewrap' }, stage, stateLayer), inspector.el, scrim);
-    put(root, topbar, body, bottomNav, palette.el, dialog.el);
+    const toast = h('div', { class: 'ml-toast', role: 'status', 'aria-live': 'polite', hidden: true });
+    let toastTimer = 0;
+    function showToast(text, { action = '', onAction = null, duration = 3500, error = false } = {}) {
+        clearTimeout(toastTimer);
+        clear(toast);
+        toast.classList.toggle('is-error', error);
+        put(toast,
+            icon(error ? 'alert' : 'check', { size: 15 }),
+            h('span', { class: 'ml-toast-text', text }),
+            action ? h('button', { type: 'button', class: 'ml-toast-btn', onClick: () => { toast.hidden = true; clearTimeout(toastTimer); onAction?.(); } }, icon('undo', { size: 14 }), h('span', { text: action })) : null);
+        toast.hidden = false;
+        toastTimer = setTimeout(() => { toast.hidden = true; }, duration);
+    }
+    put(root, topbar, body, bottomNav, palette.el, dialog.el, toast);
 
     function renderTopbar() {
         const state = store.get();
@@ -266,7 +312,11 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
             renderAll();
         }
     }
-    const scheduleReload = debounce(() => load(), 400);
+    // Don't yank an open inline editor away mid-typing; retry shortly.
+    const scheduleReload = debounce(function retry() {
+        if (isEditing()) { setTimeout(() => scheduleReload(), 600); return; }
+        load();
+    }, 400);
     const unsubscribeSource = source.subscribe?.(() => scheduleReload()) || (() => {});
 
     // ----- Reactions ------------------------------------------------------

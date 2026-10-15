@@ -12,13 +12,17 @@
 <body>
     <script type="module">
         import { mountMemoryLens } from '../src/app.js';
-        import { createMockSnapshot, createLargeSnapshot, createMockSchemaAccess } from './mock-data.js';
+        import { createMockSnapshot, createLargeSnapshot, createMockSchemaAccess, createMockAiAccess, createMockEditAccess } from './mock-data.js';
 
         const params = new URLSearchParams(location.search);
         const scenario = params.get('data') || 'demo';
-        if (params.get('theme')) localStorage.setItem('memoryLens.prefs.v1', JSON.stringify({ ...JSON.parse(localStorage.getItem('memoryLens.prefs.v1') || '{}'), theme: params.get('theme') }));
+        for (const key of ['theme', 'view']) {
+            if (params.get(key)) localStorage.setItem('memoryLens.prefs.v1', JSON.stringify({ ...JSON.parse(localStorage.getItem('memoryLens.prefs.v1') || '{}'), [key]: params.get(key) }));
+        }
 
         const schemaAccess = createMockSchemaAccess();
+        let notify = () => {};
+        const editAccess = createMockEditAccess(() => notify('commit'));
         const source = {
             kind: 'mock',
             locale: () => params.get('lang') || 'zh-CN',
@@ -26,14 +30,16 @@
                 await new Promise(r => setTimeout(r, 120));
                 if (scenario === 'error') throw Object.assign(new Error('mock'), { code: 'no-extension' });
                 if (scenario === 'empty') return { chatKey: 'empty', chatLabel: '新聊天', nodes: [], edges: [], schema: { types: [] }, columnLabels: {}, injection: null, lastRecall: null };
-                return {
+                return editAccess.apply({
                     ...(scenario === 'large' ? createLargeSnapshot(Number(params.get('n') || 600)) : createMockSnapshot()),
                     columnLabels: schemaAccess.labels(),
-                };
+                });
             },
-            subscribe() { return () => {}; },
+            subscribe(onChange) { notify = onChange; return () => { notify = () => {}; }; },
             // Editing is only wired up for the demo dataset.
             schema: scenario === 'demo' || scenario === 'empty' ? schemaAccess : null,
+            ai: scenario === 'demo' || scenario === 'empty' ? createMockAiAccess() : null,
+            edit: scenario === 'demo' ? editAccess : null,
             openNative() { return false; },
         };
         window.__lens = mountMemoryLens({
