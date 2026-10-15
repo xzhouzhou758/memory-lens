@@ -1,7 +1,7 @@
 # CLAUDE.md — Memory Lens（记忆透镜）
 
 Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-graph` 扩展做的可视化工作台。
-仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.3.1。
+仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.4.0。
 
 ## 用户的硬性要求（必须遵守）
 
@@ -14,7 +14,7 @@ Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-grap
 ## 命令
 
 ```bash
-npm test                      # node:test，无依赖，Node ≥ 20（当前 39 个用例）
+npm test                      # node:test，无依赖，Node ≥ 20（当前 43 个用例）
 npm run preview               # http://127.0.0.1:4173/preview/index.html 示例数据
 # 预览参数：?data=demo|large|empty|error  &theme=dark|light  &view=graph|timeline|table|schema  &n=800
 ```
@@ -37,10 +37,10 @@ src/views/             graph / timeline / table 三个只读视图
 src/panels/            sidebar 筛选、inspector 详情、palette 搜索、dialog
 src/schema/            schema-model.js（纯函数）+ schema-view.js（记忆结构编辑器 UI）
 src/edit/              edit-model.js（纯函数：可改规则、值转换）+ inline-edit.js（双击原地编辑）
-src/ai/                ai-model.js（纯函数：对话循环、历史回放）+ ai-panel.js（记忆结构页右侧的 AI 助手）
+src/ai/                ai-model.js（纯函数：对话循环、内置提示词）、schema-diff.js（纯函数：条目级改动 + 按需应用）、change-list.js（改动清单 UI）、ai-panel.js（AI 助手）
 css/                   tokens → shell → … → schema → compact（≤860px 移动布局，最后加载）
 preview/               独立预览：mock-data.js（原创虚构“雾港”故事 + 模拟 schema 读写）、serve.mjs
-tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.test.mjs
+tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.test.mjs、diff.test.mjs
 ```
 
 视图接口：`{ id, el, render(), onShow?(), invalidate?(), onSelectionChange?(), destroy?() }`。schema 视图是“全宽视图”（`isFullView`），隐藏侧栏和详情栏，无聊天时也能打开。
@@ -84,12 +84,16 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
 - 保存前弹窗列出中文改动摘要（`describeChanges`），保存后 12 秒内可撤销。
 - 允许类型重名（用户的自定义“剧情线”和内置 thread 都叫“剧情线”）。
 
-## AI 助手（替代原生「AI 迭代 Schema」的前端）
+## AI 功能（都只在记忆结构页）
 
-- 原生工作室的对话循环、提案总线都在 `openSchemaIterationStudio` 闭包里，没导出，所以**流程是我们自己串的**（source-luker.js `createAiAccess` + ai-model.js `runTurn`）。复用的导出：`schema-iteration/tools.js`（`buildToolCatalog`、`normalizeToolCallToEdit` 沙盒）、`read-fields-dispatcher.js`、`system-prompt.js`、`/scripts/iteration-library/runner.js` 的 `requestToolCallsWithRetry`。模型用 memory-graph 设置里的 `requestApiPresetName` / `requestLlmPresetName`。
-- AI 的修改只进编辑器草稿（未保存），用户点「保存」才走原有的保存 / 撤销流程。每轮有中文改动摘要和「撤销这一轮」（连带撤销之后的轮次）。AI 工作时编辑器和保存按钮锁定。
-- 不提供 reset_to_blank / reset_to_global 控制工具，不接世界书读取工具（首版从简）。系统提示词后追加中文回复要求（`LANGUAGE_NOTE`）。
-- 会话存 `extensionSettings.memory_lens.aiSessions[scopeKey]`，scopeKey = `character_<avatar>` 或 `global`，最多 12 条；与原生工作室的历史互不相通。
+- **AI 设置**（助手栏齿轮）：两组「连接配置 + 生成预设」，选项来自 Luker 连接管理器（`connection-manager/profile-resolver.js` `getChatCompletionConnectionProfiles`）和 `ctx.getPresetManager('openai').getAllPresets()`。存 `extensionSettings.memory_lens.ai = { assistant:{api,preset}, tools:{same,api,preset} }`；空 = 跟随 memory-graph 的 `requestApiPresetName/requestLlmPresetName`。每组可「测试」。
+- **AI 助手**：流程自己串（原生工作室的循环在闭包里没导出）。复用 `schema-iteration/tools.js`（`buildToolCatalog`、`normalizeToolCallToEdit` 沙盒）、`read-fields-dispatcher.js`、`system-prompt.js`、`iteration-library/runner.js` 的 `requestToolCallsWithRetry`。AI 在**自己的副本**上改；一轮结束用 `diffSchemas(编辑器, AI副本)` 得到条目级改动（新增/删除记录项、提示改动带原文对比高亮、改名、必填、开关、顺序、新建/删除类型），不出现代码或 key。
+  - 「自动应用」勾选框（localStorage `memoryLens.aiAutoApply`，默认关）：关 = 逐条勾选「应用所选」；开 = 直接应用。应用只进草稿，仍需「保存」。每轮可「撤销这一轮」（连带之后的轮次）。部分应用 / 放弃会写回 tool_result，让 AI 下一轮知道。
+  - 用户手改过的条目（`handEdits`）在待应用清单里标「已过期」不可勾。编辑器里 AI 改过的项标「AI 新增 / AI 已改」，类型列表显示「AI 改了 N 处」；保存、放弃修改、重新加载后清除。点改动行 → 编辑器跳到该项并闪一下。
+  - 读结构的工具调用合并成一行「AI 查看了 N 次结构」。不提供 reset_to_blank/global 控制工具、不接世界书工具。会话存 `memory_lens.aiSessions[scopeKey]`，最多 12 条。
+- **完善这个类型**（类型标题旁）：可选一句要求 → `source.ai.suggestType` 让 AI 调一次 `mg_schema_set_node_type`，沙盒得到整份新结构 → 同样的改动清单勾选应用。
+- **AI 优化**（每块「给 AI 的提示」上）：`source.ai.rewrite({kind:'columnHint'|'typeIntro'})`，单个 `submit_text` 工具取回文字，填回输入框。数据表 / 详情栏的双击编辑**没有** AI 按钮（用户明确只要结构页有）。
+- 内置提示词在 ai-model.js：`SCHEMA_PRIMER` 说明 memory-graph 怎么用 extractHint / columnHints / required / alwaysInject / latestOnly+主键 / compression；`suggestSystemPrompt` 要求保留所有已有 key、新 key 用 snake_case、全中文。
 - **未在真实 Luker + 真实模型上测过**，只在 preview 的 `createMockAiAccess` 上测过。
 
 ## 双击修改记忆内容
@@ -97,7 +101,6 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
 - 交互：`src/edit/inline-edit.js` 的 `editable(el, {app, node, key, value})`；key '' = 节点标题。原格子显示超过一行就用同宽的自增高 textarea（按实际显示判断，不按字数）；表格单元格保留 td 本身只换内容。Enter 保存、Shift+Enter 换行；有分段的内容（事件正文、含换行）才用 Ctrl/⌘+Enter；光标放末尾不全选；Esc 取消；点别处保存。保存后底部提示可撤销（10 秒）。编辑中实时刷新会推迟。
 - 规则（`edit-model.js`）：自动合并摘要（rollup）、已归档不可改；事件标题自动生成不可改（改正文）。数组字段用「、」拆合，保持原类型。
 - 写入（source-luker.js `createEditAccess`）：照 memory-graph 图谱迭代工作室的手动编辑路径——`ensureStoreSyncedWithChat` → 副本上 `getMemoryGraphWriteApi(..., {useInFlightAnchor:false, preserveSeqOnEdit:true}).editNode` → `commitGraphUiMutation` → `syncGraphVectorsAfterMutation`。内部函数不在时退回公开的 `openSession(ctx).editNode`（会推进 seqTo）。
-- 「AI 优化」按钮：`app.rewriteValue` → `source.ai.rewrite({kind:'memoryValue', instruction: 该项 columnHint, siblings: 已知名称, context: 同条其他字段})`。只润色不加事实；结果填回编辑框，用户自己保存。记忆结构页的「给 AI 的提示」（记录项说明 kind:'columnHint'、类型简介 kind:'typeIntro'）也有同样按钮。提示词在 ai-model.js `rewriteSystemPrompt/rewriteUserPrompt`。
 - **未在真实 Luker 中测过**，只在 preview 的 mock 上测过。
 
 ## 待办 / 可能的下一步

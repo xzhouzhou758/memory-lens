@@ -10,7 +10,7 @@
 // duplicate state. If the import path ever moves, `load()` reports a clear
 // error instead of crashing the UI.
 
-import { buildTaskMessages as aiTaskMessages, rewriteSystemPrompt, rewriteUserPrompt } from './ai/ai-model.js';
+import { buildTaskMessages as aiTaskMessages, rewriteSystemPrompt, rewriteUserPrompt, suggestSystemPrompt, suggestUserPrompt } from './ai/ai-model.js';
 
 const MG_BASE = '/scripts/extensions/memory-graph';
 const CHAT_EVENTS = ['CHAT_CHANGED', 'CHAT_DELETED'];
@@ -313,9 +313,29 @@ function createAiAccess(resolveApi) {
         return info?.hasAvatar ? `character_${info.avatar}` : 'global';
     };
 
-    // One-shot rewrite through the same runner: a single submit tool keeps the
-    // answer clean (no chatter around the text).
-    const SUBMIT_TOOL = {
+    // ----- Which model each AI uses ------------------------------------------
+    // Stored in our own settings; '' = follow memory-graph's request presets.
+    // The 'tools' group (AI 优化 / 完善类型) may also say 'same' = AI 助手's.
+    const aiSettings = (ctx) => {
+        const all = ctx.extensionSettings || {};
+        all[LABEL_KEY] ||= {};
+        all[LABEL_KEY].ai ||= {};
+        const ai = all[LABEL_KEY].ai;
+        ai.assistant ||= { api: '', preset: '' };
+        ai.tools ||= { same: true, api: '', preset: '' };
+        return ai;
+    };
+    const presetsFor = (ctx, settings, role) => {
+        const ai = aiSettings(ctx);
+        const group = role === 'tools' && !ai.tools.same ? ai.tools : ai.assistant;
+        return {
+            apiPresetName: String(group.api || settings?.requestApiPresetName || '').trim(),
+            llmPresetName: String(group.preset || settings?.requestLlmPresetName || '').trim(),
+        };
+    };
+    const runnerSettings = (settings) => ({ toolCallRetryMax: settings?.toolCallRetryMax, rpmLimit: settings?.rpmLimit });
+
+    const SUBMIT_TEXT = {
         type: 'function',
         function: {
             name: 'submit_text',
@@ -324,37 +344,112 @@ function createAiAccess(resolveApi) {
         },
     };
 
+    async function oneShot(role, { system, user, tools, allowedNames, signal = null }) {
+        const { ctx } = resolveApi();
+        const { main, runner } = await loadModules();
+        const settings = main.getSettings();
+        return runner.requestToolCallsWithRetry(ctx, runnerSettings(settings), {
+            taskMessages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+            runtimeWorldInfo: null,
+            ...presetsFor(ctx, settings, role),
+            tools,
+            allowedNames,
+            abortSignal: signal,
+            includeAssistantText: true,
+            allowNoToolCalls: true,
+        });
+    }
+
     return {
         async check() {
             await loadModules();
             return true;
         },
 
-        /** @param {{ kind: string, text: string, typeName?: string, itemName?: string, siblings?: string[], instruction?: string, context?: string }} request */
-        async rewrite(request) {
+        /** Connection profiles / generation presets the user can pick, plus current choices. */
+        async settings() {
             const { ctx } = resolveApi();
-            const { main, runner } = await loadModules();
+            const { main } = await loadModules();
             const settings = main.getSettings();
-            const result = await runner.requestToolCallsWithRetry(ctx, {
-                toolCallRetryMax: settings?.toolCallRetryMax,
-                rpmLimit: settings?.rpmLimit,
-            }, {
-                taskMessages: [
-                    { role: 'system', content: rewriteSystemPrompt(request.kind) },
-                    { role: 'user', content: rewriteUserPrompt(request) },
-                ],
-                runtimeWorldInfo: null,
-                apiPresetName: String(settings?.requestApiPresetName || '').trim(),
-                llmPresetName: String(settings?.requestLlmPresetName || '').trim(),
-                tools: [SUBMIT_TOOL],
+            let connections = [];
+            try {
+                const resolver = await import('/scripts/extensions/connection-manager/profile-resolver.js');
+                connections = (resolver.getChatCompletionConnectionProfiles?.() || []).map(p => p.name).filter(Boolean);
+            } catch { connections = []; }
+            let presets = [];
+            try {
+                const names = ctx.getPresetManager?.('openai')?.getAllPresets?.();
+                presets = Array.isArray(names) ? [...new Set(names.map(n => String(n || '').trim()).filter(Boolean))] : [];
+            } catch { presets = []; }
+            return {
+                connections,
+                presets,
+                memory: { api: String(settings?.requestApiPresetName || ''), preset: String(settings?.requestLlmPresetName || '') },
+                ai: structuredClone(aiSettings(ctx)),
+            };
+        },
+
+        async saveSettings(next) {
+            const { ctx } = resolveApi();
+            const ai = aiSettings(ctx);
+            ai.assistant = { api: String(next?.assistant?.api || ''), preset: String(next?.assistant?.preset || '') };
+            ai.tools = { same: next?.tools?.same !== false, api: String(next?.tools?.api || ''), preset: String(next?.tools?.preset || '') };
+            ctx.saveSettingsDebounced?.();
+        },
+
+        /** Sends a tiny request with the given role's model. */
+        async test(role) {
+            const result = await oneShot(role, {
+                system: 'Connectivity check. Call submit_text with the text "OK".',
+                user: 'ping',
+                tools: [SUBMIT_TEXT],
                 allowedNames: ['submit_text'],
-                includeAssistantText: true,
-                allowNoToolCalls: true,
+            });
+            const ok = (result?.toolCalls || []).some(c => c?.name === 'submit_text') || Boolean(String(result?.assistantText || '').trim());
+            if (!ok) throw new SourceError('ai-empty', 'AI 没有返回内容');
+            return true;
+        },
+
+        /** AI 优化 for one schema text (item hint / type intro). */
+        async rewrite(request) {
+            const result = await oneShot('tools', {
+                system: rewriteSystemPrompt(request.kind),
+                user: rewriteUserPrompt(request),
+                tools: [SUBMIT_TEXT],
+                allowedNames: ['submit_text'],
             });
             const call = (result?.toolCalls || []).find(c => c?.name === 'submit_text');
             const text = String(call?.args?.text ?? result?.assistantText ?? '').trim();
             if (!text) throw new SourceError('ai-empty', 'AI 没有返回内容');
             return text;
+        },
+
+        /**
+         * 「AI 帮我完善这个类型」: the AI calls memory-graph's own set_node_type
+         * once; we run it in the sandbox and return the full proposed schema.
+         * @returns {{ live: object[], note: string }}
+         */
+        async suggestType({ live, typeId, request = '', signal = null }) {
+            const { main, tools } = await loadModules();
+            const setTool = tools.buildToolCatalog().find(def => def?.function?.name === 'mg_schema_set_node_type');
+            if (!setTool) throw new SourceError('ai-unsupported');
+            const spec = live.find(t => String(t.id) === String(typeId));
+            const result = await oneShot('tools', {
+                system: suggestSystemPrompt(),
+                user: suggestUserPrompt({ spec, others: live.filter(t => t !== spec), request }),
+                tools: [setTool],
+                allowedNames: ['mg_schema_set_node_type'],
+                signal,
+            });
+            const call = (result?.toolCalls || []).find(c => c?.name === 'mg_schema_set_node_type');
+            if (!call) throw new SourceError('ai-empty', String(result?.assistantText || '').trim() || 'AI 没有给出建议');
+            const args = { ...(call.args || {}), id: String(typeId) };
+            const edits = await tools.normalizeToolCallToEdit(
+                { function: { name: 'mg_schema_set_node_type', arguments: JSON.stringify(args) } },
+                { live, normalizeNodeTypeSchema: main.normalizeNodeTypeSchema },
+            );
+            const next = edits?.length ? edits[edits.length - 1].newValue : live;
+            return { live: next, note: String(result?.assistantText || '').trim() };
         },
 
         async listSessions() {
@@ -382,14 +477,10 @@ function createAiAccess(resolveApi) {
             const basePrompt = String(effective?.schemaIterSystemPrompt || '').trim() || prompt.DEFAULT_SCHEMA_ITER_SYSTEM_PROMPT || '';
             const control = new Set(Object.values(tools.CONTROL_TOOL_NAMES || {}));
             const catalog = [...tools.buildToolCatalog().filter(def => !control.has(def?.function?.name)), SCHEMA_READ_TOOL];
-            const result = await runner.requestToolCallsWithRetry(ctx, {
-                toolCallRetryMax: settings?.toolCallRetryMax,
-                rpmLimit: settings?.rpmLimit,
-            }, {
+            const result = await runner.requestToolCallsWithRetry(ctx, runnerSettings(settings), {
                 taskMessages: aiTaskMessages(`${basePrompt}${LANGUAGE_NOTE}`, messages),
                 runtimeWorldInfo: null,
-                apiPresetName: String(settings?.requestApiPresetName || '').trim(),
-                llmPresetName: String(settings?.requestLlmPresetName || '').trim(),
+                ...presetsFor(ctx, settings, 'assistant'),
                 tools: catalog,
                 abortSignal: signal,
                 includeAssistantText: true,

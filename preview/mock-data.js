@@ -303,12 +303,29 @@ export function createLargeSnapshot(count = 600) {
 /** Scripted stand-in for the AI schema assistant (preview only, no network). */
 export function createMockAiAccess() {
     let sessions = [];
+    let aiSettings = { assistant: { api: '', preset: '' }, tools: { same: true, api: '', preset: '' } };
     const wait = (ms, signal) => new Promise((resolve, reject) => {
         const timer = setTimeout(resolve, ms);
         signal?.addEventListener('abort', () => { clearTimeout(timer); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); });
     });
     return {
         check: async () => true,
+        async settings() {
+            return { connections: ['DeepSeek（便宜）', 'Claude 主力'], presets: ['默认', '严谨'], memory: { api: '', preset: '' }, ai: structuredClone(aiSettings) };
+        },
+        async saveSettings(next) { aiSettings = structuredClone(next); },
+        async test() { await new Promise(r => setTimeout(r, 400)); return true; },
+        async suggestType({ live, typeId }) {
+            await new Promise(r => setTimeout(r, 600));
+            const next = structuredClone(live);
+            const spec = next.find(t => t.id === typeId);
+            spec.tableColumns = [...spec.tableColumns, 'due_at', 'remind'];
+            spec.columnHints = { ...(spec.columnHints || {}), due_at: '截止时间：完整日期 + 钟点，例如 6月14日 19:00；没有就留空', remind: '提醒方式：到期前由谁、怎么提醒' };
+            const first = spec.tableColumns[0];
+            spec.columnHints[first] = `${spec.columnHints[first] || '名称'}，写成「当事人·事项」，10 字内`;
+            spec.alwaysInject = true;
+            return { live: next, note: '补了时间和提醒两项，并让待办一直可见。' };
+        },
         async rewrite({ text }) {
             await new Promise(r => setTimeout(r, 500));
             return `${String(text).replace(/\s+/g, ' ').trim().replace(/[。.]?$/, '')}。`;

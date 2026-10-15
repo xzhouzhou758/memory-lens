@@ -6,8 +6,8 @@
 
 import { h, clear, debounce, formatTime, put } from './util.js';
 import { icon } from './icons.js';
-import { t, setLocale, typeLabel, fieldLabel } from './i18n.js';
-import { buildModel, defaultFilters, fieldText } from './model.js';
+import { t, setLocale } from './i18n.js';
+import { buildModel, defaultFilters } from './model.js';
 import { createStore, loadPrefs } from './store.js';
 import { createGraphView } from './views/graph-view.js';
 import { createTimelineView } from './views/timeline-view.js';
@@ -100,26 +100,6 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
         },
         reload: () => load({ manual: true }),
         canEdit: () => Boolean(source.edit),
-        canRewrite: () => Boolean(source.ai?.rewrite),
-        /** AI 优化 for one stored value; returns the suggested text (not saved). */
-        rewriteValue(node, key, text) {
-            const names = [...(model?.nodes.values() || [])]
-                .filter(n => n.type !== 'event' && n.id !== node.id)
-                .map(n => n.title).filter(Boolean).slice(0, 40);
-            const context = Object.entries(node.fields || {})
-                .filter(([k, v]) => k !== key && fieldText(v).trim())
-                .slice(0, 12)
-                .map(([k, v]) => `${fieldLabel(k, node.type)}: ${fieldText(v).slice(0, 160)}`).join('\n');
-            return source.ai.rewrite({
-                kind: 'memoryValue',
-                text,
-                typeName: typeLabel(node.type),
-                itemName: key === '' ? t('title') : fieldLabel(key, node.type),
-                instruction: model?.schemaHints.get(node.type)?.[key] || '',
-                siblings: [node.title, ...names].filter(Boolean),
-                context,
-            });
-        },
         notify: (text) => showToast(text),
         /** Saves one edited value; key '' = title. Offers 撤销 afterwards. */
         async editNode(node, key, text, original) {

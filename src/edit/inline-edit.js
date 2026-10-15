@@ -7,7 +7,6 @@
 // Esc cancels, clicking away saves. Saving goes through app.editNode (撤销).
 
 import { h } from '../util.js';
-import { icon } from '../icons.js';
 import { t } from '../i18n.js';
 import { editRule, toEditText, isChanged, hasParagraphs } from './edit-model.js';
 import { restoreSummaryLayout } from '../model.js';
@@ -67,39 +66,7 @@ function open(el, { app, node, key, value, label }) {
     });
     field.value = text;
     const hint = h('span', { class: 'ml-inline-hint', text: paragraphs ? t('editKeysMulti') : multiline ? t('editKeysWrap') : t('editKeys') });
-    let busy = false;
-    // AI 优化: fills the editor with a suggestion; the user still saves it.
-    const optimize = app.canRewrite?.()
-        ? h('button', {
-            type: 'button',
-            class: 'ml-inline-ai',
-            title: t('aiOptimizeValueHint'),
-            onPointerdown: (event) => event.preventDefault(), // keep focus in the field
-            onClick: async () => {
-                if (busy) return;
-                const base = field.value.trim();
-                if (!base) return;
-                busy = true;
-                optimize.disabled = true;
-                optimize.lastChild.textContent = t('aiOptimizing');
-                try {
-                    const next = await app.rewriteValue(node, key, base);
-                    if (!done && next) {
-                        field.value = next;
-                        fit();
-                        field.focus({ preventScroll: true });
-                    }
-                } catch (err) {
-                    app.notify?.(t('aiFailed', String(err?.message || err)));
-                } finally {
-                    busy = false;
-                    optimize.disabled = false;
-                    optimize.lastChild.textContent = t('aiOptimize');
-                }
-            },
-        }, icon('sparkle', { size: 12 }), h('span', { text: t('aiOptimize') }))
-        : null;
-    const foot = h('span', { class: 'ml-inline-foot' }, hint, optimize);
+    const foot = h('span', { class: 'ml-inline-foot' }, hint);
     const wrap = h('span', { class: `ml-inline ${multiline ? 'is-multi' : ''}`.trim(), onClick: (e) => e.stopPropagation(), onDblclick: (e) => e.stopPropagation() }, field, foot);
     // Cells keep their element (table / list layout stays intact); the editor
     // replaces their content. Inline values are swapped out whole.
@@ -134,8 +101,7 @@ function open(el, { app, node, key, value, label }) {
         app.editNode(node, key, next, original);
     };
     const cancel = () => { close(); el.focus?.(); };
-    // Clicking away saves — except while AI 优化 is still working.
-    const outside = (event) => { if (!wrap.contains(event.target) && !busy) commit(); };
+    const outside = (event) => { if (!wrap.contains(event.target)) commit(); };
     field.addEventListener('input', fit);
     field.addEventListener('keydown', (event) => {
         event.stopPropagation();

@@ -15,6 +15,8 @@ import {
     describeChanges, draftsEqual, cloneDrafts,
 } from './schema-model.js';
 import { createAiPanel } from '../ai/ai-panel.js';
+import { diffSchemas, applyChanges, changeMarks } from '../ai/schema-diff.js';
+import { changeList } from '../ai/change-list.js';
 
 const UNDO_MS = 12000;
 
@@ -28,6 +30,9 @@ export function createSchemaView(app, source) {
     let ai = null;
     let aiOpen = false;
     let aiBusy = false;
+    let aiMarks = {}; // typeId → { count, added, columns: { key: 'added'|'changed' } }
+    const handEdits = new Set(); // 'typeId:key' the user changed by hand (staleness)
+    let suggestState = null;
     const toast = h('div', { class: 'ml-schema-toast', role: 'status', 'aria-live': 'polite', hidden: true });
     const root = h('div', { class: 'ml-schema' }, bar, body, toast);
 
@@ -44,6 +49,7 @@ export function createSchemaView(app, source) {
     let undoTimer = null;
     let needsReload = true;
     let modal = null;
+    let modalCancel = null;
     let errors = [];
     const openItems = new Set();
 
@@ -71,6 +77,9 @@ export function createSchemaView(app, source) {
             selectedUid = (drafts.find(d => d.id === keepId) || drafts[0])?.uid || '';
             errors = [];
             status = 'ready';
+            aiMarks = {};
+            handEdits.clear();
+            suggestState = null;
             ai?.reset();
         } catch (err) {
             status = err?.code === 'schema-unsupported' ? 'unsupported' : 'error';
@@ -148,7 +157,9 @@ export function createSchemaView(app, source) {
 
     function typeMeta(draft) {
         const count = nodeCount(draft.id);
-        return `${draft.columns.length} 项 · ${count ? t('schemaUsage', count) : t('schemaNoUsage')}`;
+        const ai = aiMarks[draft.id];
+        const aiText = ai ? ` · ${ai.added ? t('aiMarkNewType') : t('aiMarkCount', ai.count)}` : '';
+        return `${draft.columns.length} 项 · ${count ? t('schemaUsage', count) : t('schemaNoUsage')}${aiText}`;
     }
 
     function typeChanged(draft) {
@@ -167,7 +178,7 @@ export function createSchemaView(app, source) {
                     return h('button', {
                         type: 'button',
                         role: 'option',
-                        class: `ml-schema-type ${hasError ? 'has-error' : ''}`.trim(),
+                        class: `ml-schema-type ${hasError ? 'has-error' : ''} ${aiMarks[draft.id] ? 'has-ai' : ''}`.trim(),
                         'aria-selected': String(draft.uid === selectedUid),
                         dataset: { uid: draft.uid, tone: typeVisual(draft.id).tone },
                         onClick: () => {
@@ -219,8 +230,11 @@ export function createSchemaView(app, source) {
             placeholder: draft.usesDefaultIntro ? t('schemaDefaultHint') : t('schemaIntroPh'),
             label: t('schemaIntroLabel'),
             className: 'ml-schema-intro',
-            onInput: (value) => { draft.intro = value; touched(); },
+            onInput: (value) => { draft.intro = value; handEdits.add(`${draft.id}:intro`); touched(); },
         });
+        const suggestBtn = aiAccess?.suggestType
+            ? button(t('aiSuggestBtn'), () => suggestForType(draft), { iconName: 'sparkle', className: 'ml-btn-sm ml-schema-suggest', disabled: aiBusy, title: t('aiSuggestHint') })
+            : null;
         const items = h('ol', { class: 'ml-schema-items' }, draft.columns.map(column => itemRow(draft, column)));
         put(editor, h('div', { class: 'ml-schema-editor-inner' },
             h('button', { type: 'button', class: 'ml-schema-back', onClick: () => { pane = 'list'; paint(); } },
@@ -229,7 +243,9 @@ export function createSchemaView(app, source) {
                 h('span', { class: 'ml-dot', dataset: { tone: typeVisual(draft.id).tone, shape: typeVisual(draft.id).shape }, style: { '--ml-dot-size': '14px' } }),
                 nameInput,
                 h('span', { class: 'ml-schema-usage', text: count ? t('schemaUsage', count) : t('schemaNoUsage') }),
+                suggestBtn,
                 draft.deletable ? iconButton('trash', t('schemaDeleteType'), () => deleteType(draft), { className: 'ml-schema-danger' }) : null),
+            suggestPanel(draft),
             intro,
             h('section', { class: 'ml-schema-section' },
                 h('div', { class: 'ml-section-title' }, h('span', { text: `${t('schemaItems')} · ${draft.columns.length}` })),
@@ -255,6 +271,7 @@ export function createSchemaView(app, source) {
             onClick: () => {
                 draft[key] = !draft[key];
                 card.setAttribute('aria-checked', String(draft[key]));
+                handEdits.add(`${draft.id}:${key}`);
                 touched();
             },
         },
@@ -281,6 +298,7 @@ export function createSchemaView(app, source) {
             onInput: (event) => {
                 column.label = event.target.value;
                 event.target.removeAttribute('aria-invalid');
+                handEdits.add(`${draft.id}:${column.key}`);
                 touched();
             },
         });
@@ -310,6 +328,7 @@ export function createSchemaView(app, source) {
             onClick: () => {
                 column.required = !column.required;
                 required.setAttribute('aria-checked', String(column.required));
+                handEdits.add(`${draft.id}:${column.key}`);
                 touched();
             },
         }, h('span', { text: t('schemaRequiredShort') }));
@@ -324,10 +343,12 @@ export function createSchemaView(app, source) {
                 if (event.key === 'ArrowDown') { event.preventDefault(); moveItem(draft, column, 1, true); }
             },
         }, icon('grip', { size: 14 }));
-        const row = h('li', { class: `ml-schema-item ${column.isNew ? 'is-new' : ''} ${open ? 'is-open' : ''}`.trim(), dataset: { uid: column.uid } },
+        const aiMark = aiMarks[draft.id]?.columns[column.key];
+        const row = h('li', { class: `ml-schema-item ${column.isNew ? 'is-new' : ''} ${open ? 'is-open' : ''} ${aiMark ? 'has-ai' : ''}`.trim(), dataset: { uid: column.uid } },
             h('div', { class: 'ml-schema-item-line' },
                 grip,
                 nameInput,
+                aiMark ? h('span', { class: 'ml-ai-tag', dataset: { kind: aiMark }, title: t('aiTagHint'), text: aiMark === 'added' ? t('aiTagAdded') : t('aiTagChanged') }) : null,
                 toggle,
                 required,
                 iconButton('trash', column.locked ? t('schemaLocked') : t('schemaDeleteItem'), () => removeItem(draft, column), { className: 'ml-iconbtn-sm ml-schema-danger', disabled: column.locked })),
@@ -339,7 +360,7 @@ export function createSchemaView(app, source) {
                 note: t('aiPromptItemNote'),
                 className: 'ml-schema-itemhint',
                 optimize: () => ({ kind: 'columnHint', typeName: draft.name, itemName: column.label, siblings: draft.columns.map(c => c.label).filter(Boolean) }),
-                onInput: (value) => { column.hint = value; touched(); },
+                onInput: (value) => { column.hint = value; handEdits.add(`${draft.id}:${column.key}`); touched(); },
             }) : null);
         return row;
     }
@@ -512,6 +533,9 @@ export function createSchemaView(app, source) {
 
     function discard() {
         drafts = cloneDrafts(base);
+        aiMarks = {};
+        handEdits.clear();
+        ai?.reset();
         scopeCharacter = info?.scope === 'character';
         errors = [];
         if (!drafts.some(d => d.uid === selectedUid)) selectedUid = drafts[0]?.uid || '';
@@ -561,15 +585,19 @@ export function createSchemaView(app, source) {
         if (aiOpen && !ai) {
             ai = createAiPanel(aiAccess, {
                 getLive: () => drafts.map(fromDraft),
-                applyLive: (types) => applyAiTypes(types),
-                snapshot: () => ({ drafts: cloneDrafts(drafts), selectedUid }),
+                labels: () => currentLabels(),
+                applyChanges: (changes) => applyAiChanges(changes),
+                snapshot: () => ({ drafts: cloneDrafts(drafts), selectedUid, marks: structuredClone(aiMarks) }),
                 restore: (snap) => {
                     drafts = cloneDrafts(snap.drafts);
+                    aiMarks = snap.marks || {};
                     selectedUid = drafts.some(d => d.uid === snap.selectedUid) ? snap.selectedUid : drafts[0]?.uid || '';
                     errors = [];
                     paint();
                 },
-                describe: (before, after) => describeChanges(before.drafts, after.drafts, app.model()?.typeCounts || new Map()),
+                touched: () => handEdits,
+                focusChange: (change) => focusChange(change),
+                openSettings: () => openAiSettings(),
                 onClose: () => toggleAi(),
                 onBusy: (value) => {
                     aiBusy = value;
@@ -583,23 +611,29 @@ export function createSchemaView(app, source) {
         if (aiOpen) ai.focus();
     }
 
-    // AI edits arrive as full type specs; turn them back into drafts while
-    // keeping uids, the current selection and every name the user can see.
-    function applyAiTypes(types) {
+    // Names the user can see right now, so applied AI specs keep them.
+    function currentLabels() {
         const labels = {};
         for (const draft of drafts) {
             for (const column of draft.columns) {
                 if (column.label.trim()) (labels[draft.id] ||= {})[column.key] = column.label.trim();
             }
         }
+        return labels;
+    }
+
+    // Applies chosen AI changes onto the drafts, keeping uids, selection and
+    // every visible name; marks what changed so the editor can show it.
+    function applyAiChanges(changes) {
+        if (!changes.length) return;
+        const labels = currentLabels();
+        const { specs, labels: renames } = applyChanges(drafts.map(fromDraft), changes);
+        for (const [typeId, cols] of Object.entries(renames)) labels[typeId] = { ...(labels[typeId] || {}), ...cols };
         const prevById = new Map(drafts.map(d => [d.id, d]));
-        const next = toDrafts(types, labels, info?.defaults || []);
+        const next = toDrafts(specs, labels, info?.defaults || []);
         for (const draft of next) {
             const prev = prevById.get(draft.id);
-            if (!prev) {
-                draft.isNew = true;
-                continue;
-            }
+            if (!prev) { draft.isNew = true; continue; }
             draft.uid = prev.uid;
             draft.isNew = prev.isNew;
             const prevCols = new Map(prev.columns.map(c => [c.key, c]));
@@ -608,15 +642,179 @@ export function createSchemaView(app, source) {
                 if (old) { column.uid = old.uid; column.isNew = old.isNew; } else column.isNew = true;
             }
         }
-        const changed = next.find(d => {
-            const prev = prevById.get(d.id);
-            return !prev || JSON.stringify(fromDraft(prev)) !== JSON.stringify(fromDraft(d));
-        });
         drafts = next;
-        if (changed) selectedUid = changed.uid;
+        const marks = changeMarks(changes);
+        for (const [typeId, m] of Object.entries(marks)) {
+            const cur = (aiMarks[typeId] ||= { count: 0, columns: {}, added: false });
+            cur.count += m.count;
+            cur.added ||= m.added;
+            Object.assign(cur.columns, m.columns);
+            for (const key of Object.keys(m.columns)) handEdits.delete(`${typeId}:${key}`);
+        }
+        const first = changes.find(c => c.typeId && drafts.some(d => d.id === c.typeId));
+        if (first) selectedUid = drafts.find(d => d.id === first.typeId).uid;
         else if (!drafts.some(d => d.uid === selectedUid)) selectedUid = drafts[0]?.uid || '';
         errors = [];
+        pane = 'editor';
         paint();
+    }
+
+    function focusChange(change) {
+        const draft = drafts.find(d => d.id === change.typeId);
+        if (!draft) return;
+        selectedUid = draft.uid;
+        pane = 'editor';
+        paint();
+        const column = change.key ? draft.columns.find(c => c.key === change.key) : null;
+        requestAnimationFrame(() => {
+            const target = column ? editor.querySelector(`[data-uid="${column.uid}"]`) : editor.querySelector('.ml-schema-typehead');
+            if (!target) return;
+            target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            target.classList.add('is-flash');
+            setTimeout(() => target.classList.remove('is-flash'), 1200);
+        });
+    }
+
+    // ----- 「AI 帮我完善这个类型」 ------------------------------------------
+    async function suggestForType(draft) {
+        if (!aiAccess?.suggestType || aiBusy) return;
+        const request = await askText({
+            title: t('aiSuggestTitle', draft.name.trim() || t('schemaNewType')),
+            text: t('aiSuggestIntro'),
+            placeholder: t('aiSuggestPh'),
+            okLabel: t('aiSuggestGo'),
+        });
+        if (request === null) return;
+        suggestState = { typeUid: draft.uid, status: 'busy', changes: [], note: '' };
+        aiBusy = true;
+        paint();
+        try {
+            const live = drafts.map(fromDraft);
+            const out = await aiAccess.suggestType({ live, typeId: draft.id, request });
+            const changes = diffSchemas(live, out.live, currentLabels());
+            suggestState = { typeUid: draft.uid, status: changes.length ? 'ready' : 'empty', changes, note: out.note };
+        } catch (err) {
+            suggestState = { typeUid: draft.uid, status: 'error', changes: [], note: String(err?.message || err) };
+        } finally {
+            aiBusy = false;
+            paint();
+        }
+    }
+
+    function suggestPanel(draft) {
+        if (!suggestState || suggestState.typeUid !== draft.uid) return null;
+        const close = () => { suggestState = null; paintEditor(); };
+        if (suggestState.status === 'busy') {
+            return h('div', { class: 'ml-suggest is-busy' }, h('span', { class: 'ml-spinner', 'aria-hidden': 'true' }), h('span', { text: t('aiSuggestBusy') }));
+        }
+        if (suggestState.status !== 'ready') {
+            return h('div', { class: 'ml-suggest' },
+                h('span', { text: suggestState.status === 'error' ? t('aiFailed', suggestState.note) : t('aiSuggestNone') }),
+                iconButton('x', t('close'), close, { className: 'ml-iconbtn-sm' }));
+        }
+        return h('div', { class: 'ml-suggest' },
+            h('div', { class: 'ml-suggest-head' },
+                h('span', { class: 'ml-prompt-tag' }, icon('sparkle', { size: 11 }), h('span', { text: t('aiSuggestLabel') })),
+                suggestState.note ? h('span', { class: 'ml-suggest-note', text: suggestState.note }) : null,
+                iconButton('x', t('close'), close, { className: 'ml-iconbtn-sm' })),
+            changeList({
+                changes: suggestState.changes,
+                stale: new Set(),
+                onApply: (chosen) => { suggestState = null; applyAiChanges(chosen); showToast(t('aiAppliedN', chosen.length)); },
+                onDiscard: close,
+                onFocus: (change) => focusChange(change),
+            }));
+    }
+
+    // ----- AI settings ------------------------------------------------------
+    async function openAiSettings() {
+        if (!aiAccess?.settings) return;
+        let data;
+        try { data = await aiAccess.settings(); } catch (err) { showToast(t('aiFailed', String(err?.message || err))); return; }
+        const state = structuredClone(data.ai);
+        const select = (value, items, emptyLabel, onChange) => {
+            const el = h('select', { class: 'ml-select', onChange: (e) => onChange(e.target.value) },
+                h('option', { value: '', text: emptyLabel }),
+                items.map(name => h('option', { value: name, text: name })),
+                value && !items.includes(value) ? h('option', { value, text: `${value}（${t('aiMissing')}）` }) : null);
+            el.value = value || '';
+            return el;
+        };
+        const followMemory = t('aiFollowMemory', data.memory.api || t('aiCurrentApi'));
+        const followPreset = t('aiFollowMemory', data.memory.preset || t('aiCurrentPreset'));
+        const testBtn = (role) => {
+            const btn = button(t('aiTest'), async () => {
+                await aiAccess.saveSettings(state);
+                btn.disabled = true;
+                btn.lastChild.textContent = t('aiTesting');
+                try {
+                    await aiAccess.test(role);
+                    btn.lastChild.textContent = t('aiTestOk');
+                } catch (err) {
+                    btn.lastChild.textContent = t('aiTestFail');
+                    showToast(t('aiFailed', String(err?.message || err)));
+                } finally {
+                    btn.disabled = false;
+                }
+            }, { className: 'ml-btn-sm' });
+            return btn;
+        };
+        const toolsFields = h('div', { class: 'ml-aiset-fields' });
+        const paintTools = () => {
+            clear(toolsFields);
+            if (state.tools.same) return;
+            put(toolsFields,
+                field(t('aiConnection'), select(state.tools.api, data.connections, followMemory, (v) => { state.tools.api = v; })),
+                field(t('aiPreset'), select(state.tools.preset, data.presets, followPreset, (v) => { state.tools.preset = v; })));
+        };
+        const sameBox = h('button', {
+            type: 'button', role: 'checkbox', class: 'ml-check', 'aria-checked': String(state.tools.same),
+            onClick: () => { state.tools.same = !state.tools.same; sameBox.setAttribute('aria-checked', String(state.tools.same)); paintTools(); },
+        }, icon('check', { size: 11 }));
+        paintTools();
+        const content = h('div', { class: 'ml-aiset' },
+            h('p', { class: 'ml-aiset-intro', text: t('aiSettingsIntro') }),
+            h('section', { class: 'ml-aiset-group' },
+                h('div', { class: 'ml-aiset-title' }, h('span', { text: t('aiTitle') }), testBtn('assistant')),
+                h('p', { class: 'ml-aiset-note', text: t('aiSettingsAssistantNote') }),
+                h('div', { class: 'ml-aiset-fields' },
+                    field(t('aiConnection'), select(state.assistant.api, data.connections, followMemory, (v) => { state.assistant.api = v; })),
+                    field(t('aiPreset'), select(state.assistant.preset, data.presets, followPreset, (v) => { state.assistant.preset = v; })))),
+            h('section', { class: 'ml-aiset-group' },
+                h('div', { class: 'ml-aiset-title' }, h('span', { text: t('aiToolsTitle') }), testBtn('tools')),
+                h('p', { class: 'ml-aiset-note', text: t('aiSettingsToolsNote') }),
+                h('label', { class: 'ml-aiset-same', onClick: (e) => { if (!sameBox.contains(e.target)) sameBox.click(); } }, sameBox, h('span', { text: t('aiSameAsAssistant') })),
+                toolsFields),
+            !data.connections.length ? h('p', { class: 'ml-aiset-warn', text: t('aiNoConnections') }) : null);
+        confirmModal({
+            title: t('aiSettings'),
+            content,
+            okLabel: t('aiSettingsSave'),
+            onOk: async () => {
+                try { await aiAccess.saveSettings(state); showToast(t('aiSettingsSaved')); } catch (err) { showToast(t('aiFailed', String(err?.message || err))); }
+            },
+        });
+    }
+
+    function field(label, control) {
+        return h('label', { class: 'ml-aiset-field' }, h('span', { class: 'ml-aiset-label', text: label }), control);
+    }
+
+    /** Small modal with one optional text box. Resolves null on cancel. */
+    function askText({ title, text, placeholder, okLabel }) {
+        return new Promise((resolve) => {
+            const area = h('textarea', { class: 'ml-schema-input ml-schema-textarea ml-ask-input', rows: 3, placeholder });
+            let settled = false;
+            const done = (value) => { if (!settled) { settled = true; resolve(value); } };
+            confirmModal({
+                title,
+                content: h('div', { class: 'ml-ask' }, h('p', { class: 'ml-ask-text', text }), area),
+                okLabel,
+                onOk: () => done(area.value.trim()),
+                onCancel: () => done(null),
+                focus: area,
+            });
+        });
     }
 
     // ----- Save / undo ----------------------------------------------------
@@ -713,27 +911,31 @@ export function createSchemaView(app, source) {
     }
 
     // ----- Modal ----------------------------------------------------------
-    function confirmModal({ title, lines = [], changes = null, okLabel, danger = false, onOk }) {
+    function confirmModal({ title, lines = [], changes = null, content: custom = null, okLabel, danger = false, onOk, onCancel = null, focus = null }) {
         closeModal();
-        const content = changes
+        const content = custom || (changes
             ? h('ul', { class: 'ml-schema-changes' }, changes.map(change => h('li', { dataset: { kind: change.kind } },
                 h('div', { class: 'ml-schema-change-name' }, h('span', { class: 'ml-schema-change-kind', text: change.kind === 'added' ? '新建' : change.kind === 'removed' ? '删除' : '修改' }), h('span', { text: change.name || t('schemaNewType') })),
                 h('ul', null, change.lines.map(line => h('li', { text: line }))))))
-            : h('div', { class: 'ml-schema-confirm-text' }, lines.filter(Boolean).map(line => h('p', { text: line })));
-        const ok = button(okLabel, async () => { closeModal(); await onOk(); }, { className: danger ? 'ml-btn-danger' : 'ml-btn-primary' });
-        const panel = h('div', { class: 'ml-dialog ml-schema-modal', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': title, tabIndex: -1 },
+            : h('div', { class: 'ml-schema-confirm-text' }, lines.filter(Boolean).map(line => h('p', { text: line }))));
+        modalCancel = onCancel;
+        const ok = button(okLabel, async () => { modalCancel = null; closeModal(); await onOk(); }, { className: danger ? 'ml-btn-danger' : 'ml-btn-primary' });
+        const panel = h('div', { class: `ml-dialog ml-schema-modal ${custom ? 'is-wide' : ''}`.trim(), role: 'alertdialog', 'aria-modal': 'true', 'aria-label': title, tabIndex: -1 },
             h('header', { class: 'ml-dialog-head' }, h('h3', { class: 'ml-dialog-title', text: title })),
             h('div', { class: 'ml-dialog-body' }, content),
             h('footer', { class: 'ml-schema-modal-foot' }, button(t('schemaCancel'), () => closeModal(), { className: 'ml-btn-ghost' }), ok));
         modal = h('div', { class: 'ml-dialog-backdrop', onMousedown: (event) => { if (event.target === modal) closeModal(); } }, panel);
         app.root.appendChild(modal);
-        requestAnimationFrame(() => ok.focus());
+        requestAnimationFrame(() => (focus || ok).focus());
     }
 
     function closeModal() {
         if (!modal) return false;
         modal.remove();
         modal = null;
+        const cancel = modalCancel;
+        modalCancel = null;
+        cancel?.();
         return true;
     }
 

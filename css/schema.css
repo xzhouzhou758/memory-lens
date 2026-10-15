@@ -395,25 +395,6 @@
 .mlens .ml-ai-thinking { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ml-text-muted); }
 .mlens .ml-ai-thinking .ml-spinner { width: 14px; height: 14px; }
 
-.mlens .ml-ai-turn {
-    border: 1px solid color-mix(in srgb, var(--ml-recalled) 45%, transparent);
-    border-radius: var(--ml-radius);
-    background: color-mix(in srgb, var(--ml-recalled) 8%, var(--ml-surface));
-    padding: 8px 10px;
-}
-.mlens .ml-ai-turn.is-undone { border-color: var(--ml-border); background: var(--ml-surface-2); opacity: 0.7; }
-.mlens .ml-ai-turn-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 600; color: var(--ml-text-muted); margin-bottom: 4px; }
-.mlens .ml-ai-turn-list { display: flex; flex-direction: column; gap: 4px; }
-.mlens .ml-ai-turn-list li { font-size: 12.5px; line-height: 1.55; }
-.mlens .ml-ai-turn-kind {
-    display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px;
-    font-size: 11px; font-weight: 600; background: var(--ml-hover); color: var(--ml-text-muted);
-}
-.mlens .ml-ai-turn-kind[data-kind="added"] { background: var(--ml-accent-soft); color: var(--ml-accent); }
-.mlens .ml-ai-turn-kind[data-kind="removed"] { background: var(--ml-danger-soft); color: var(--ml-danger); }
-.mlens .ml-ai-turn-name { font-weight: 600; margin-right: 6px; }
-.mlens .ml-ai-turn-lines { color: var(--ml-text-muted); }
-
 .mlens .ml-ai-compose {
     flex: none; display: flex; align-items: flex-end; gap: 6px;
     margin: 0 12px; padding: 6px 6px 6px 10px;
@@ -434,7 +415,13 @@
 }
 .mlens .ml-ai-send.is-busy { background: var(--ml-text-muted); }
 .mlens .ml-ai-send:disabled { opacity: 0.4; cursor: default; }
-.mlens .ml-ai-foot { flex: none; padding: 6px 14px 10px; font-size: 11px; color: var(--ml-text-faint); }
+.mlens .ml-ai-foot {
+    flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+    padding: 8px 14px 10px; font-size: 11px; color: var(--ml-text-faint);
+}
+.mlens .ml-ai-auto { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--ml-text); font-size: 12px; }
+.mlens .ml-ai-auto-note { color: var(--ml-text-faint); font-size: 11px; }
+.mlens .ml-ai-reads { font-size: 11.5px; color: var(--ml-text-faint); }
 
 /* ---- "给 AI 的提示" blocks ---- */
 .mlens .ml-schema-ai-mark {
@@ -464,3 +451,105 @@
     background: var(--ml-surface-2);
 }
 .mlens .ml-prompt.is-compact .ml-schema-intro { margin-left: 0; width: 100%; padding: 6px 8px; border-color: var(--ml-border); background: var(--ml-surface-2); }
+
+/* ---- Custom checkbox (no native inputs: Luker restyles them) ---- */
+.mlens .ml-check {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; padding: 0;
+    border: 1.5px solid var(--ml-border-strong); border-radius: 4px;
+    background: var(--ml-surface); color: transparent; cursor: pointer;
+    transition: background var(--ml-dur), border-color var(--ml-dur);
+}
+.mlens .ml-check[aria-checked="true"] { background: var(--ml-accent); border-color: var(--ml-accent); color: var(--ml-accent-text); }
+.mlens .ml-check:disabled { opacity: 0.45; cursor: default; }
+
+/* ---- AI change list ---- */
+.mlens .ml-changes-card {
+    border: 1px solid color-mix(in srgb, var(--ml-recalled) 45%, transparent);
+    border-radius: var(--ml-radius);
+    background: color-mix(in srgb, var(--ml-recalled) 7%, var(--ml-surface));
+    padding: 10px 10px 8px;
+}
+.mlens .ml-changes-card:not([data-state="pending"]) { border-color: var(--ml-border); background: var(--ml-surface-2); }
+.mlens .ml-changes-head { font-size: 12px; font-weight: 600; color: var(--ml-text-muted); margin-bottom: 6px; }
+.mlens .ml-changes-group + .ml-changes-group { margin-top: 8px; }
+.mlens .ml-changes-type { font-size: 11.5px; font-weight: 600; color: var(--ml-text-faint); margin: 2px 0 2px 2px; }
+.mlens .ml-change-line { display: flex; align-items: flex-start; gap: 8px; padding: 4px 2px; }
+.mlens .ml-change-line .ml-check { margin-top: 2px; }
+.mlens .ml-change-text {
+    flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px;
+    border: 0; background: none; padding: 0; text-align: left; cursor: pointer;
+    color: var(--ml-text); font-size: 12.5px; line-height: 1.5;
+}
+.mlens .ml-change-text:hover { color: var(--ml-accent); }
+.mlens .ml-change-caret { color: var(--ml-text-faint); margin-left: auto; }
+.mlens .ml-change-tag {
+    flex: none; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 600;
+    background: var(--ml-hover); color: var(--ml-text-muted);
+}
+.mlens .ml-change-tag[data-kind="addColumn"], .mlens .ml-change-tag[data-kind="addType"] { background: var(--ml-accent-soft); color: var(--ml-accent); }
+.mlens .ml-change-tag[data-kind="removeColumn"], .mlens .ml-change-tag[data-kind="removeType"] { background: var(--ml-danger-soft); color: var(--ml-danger); }
+.mlens .ml-change.is-stale .ml-change-text { color: var(--ml-text-faint); }
+.mlens .ml-change-stale { font-size: 10.5px; color: var(--ml-recalled); font-weight: 600; }
+.mlens .ml-change-detail {
+    margin: 2px 2px 6px 26px; padding: 8px 10px;
+    border-radius: var(--ml-radius-sm); background: var(--ml-surface); border: 1px solid var(--ml-border);
+    font-size: 12px; line-height: 1.6;
+}
+.mlens .ml-change-cols li { padding: 1px 0; color: var(--ml-text-muted); }
+.mlens .ml-change-cols li::before { content: '·  '; }
+.mlens .ml-diff-label { font-size: 10.5px; font-weight: 600; color: var(--ml-text-faint); margin-top: 4px; }
+.mlens .ml-diff-label:first-child { margin-top: 0; }
+.mlens .ml-diff-before { color: var(--ml-text-muted); }
+.mlens .ml-change-detail mark.is-del { background: var(--ml-danger-soft); color: var(--ml-danger); text-decoration: line-through; }
+.mlens .ml-change-detail mark.is-add { background: var(--ml-accent-soft); color: var(--ml-accent); }
+.mlens .ml-diff-empty { color: var(--ml-text-faint); }
+.mlens .ml-changes-foot { display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--ml-border); }
+.mlens .ml-changes-state { flex: 1; font-size: 12px; color: var(--ml-text-muted); }
+
+/* ---- AI marks in the editor ---- */
+.mlens .ml-ai-tag {
+    flex: none; height: 18px; padding: 0 6px; border-radius: 999px;
+    display: inline-flex; align-items: center;
+    font-size: 10.5px; font-weight: 600;
+    background: color-mix(in srgb, var(--ml-recalled) 18%, transparent); color: var(--ml-recalled);
+}
+.mlens .ml-schema-item.has-ai .ml-schema-item-line { box-shadow: inset 3px 0 0 var(--ml-recalled); }
+.mlens .ml-schema-type.has-ai .ml-schema-type-meta { color: var(--ml-recalled); }
+.mlens .is-flash { animation: ml-flash 1.2s var(--ml-ease); }
+@keyframes ml-flash { 0%, 40% { background: color-mix(in srgb, var(--ml-recalled) 22%, transparent); } 100% { background: transparent; } }
+
+/* ---- 完善这个类型 ---- */
+.mlens .ml-schema-suggest { flex: none; color: var(--ml-accent); }
+.mlens .ml-suggest {
+    display: flex; flex-direction: column; gap: 8px;
+    margin: 6px 0 4px; padding: 10px;
+    border: 1px solid var(--ml-border); border-radius: var(--ml-radius); background: var(--ml-surface);
+}
+.mlens .ml-suggest.is-busy, .mlens .ml-suggest:not(:has(.ml-changes-card)) { flex-direction: row; align-items: center; font-size: 12.5px; color: var(--ml-text-muted); }
+.mlens .ml-suggest.is-busy .ml-spinner { width: 14px; height: 14px; }
+.mlens .ml-suggest-head { display: flex; align-items: center; gap: 8px; }
+.mlens .ml-suggest-note { flex: 1; min-width: 0; font-size: 12px; color: var(--ml-text-muted); }
+.mlens .ml-suggest .ml-changes-card { border: 0; background: none; padding: 0; }
+
+/* ---- AI settings dialog / ask dialog ---- */
+.mlens .ml-schema-modal.is-wide { max-width: 540px; }
+.mlens .ml-aiset { display: flex; flex-direction: column; gap: 14px; }
+.mlens .ml-aiset-intro, .mlens .ml-aiset-note { font-size: 12.5px; color: var(--ml-text-muted); line-height: 1.6; }
+.mlens .ml-aiset-group { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--ml-border); border-radius: var(--ml-radius); }
+.mlens .ml-aiset-title { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 650; }
+.mlens .ml-aiset-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mlens .ml-aiset-fields:empty { display: none; }
+.mlens .ml-aiset-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mlens .ml-aiset-label { font-size: 11.5px; color: var(--ml-text-faint); }
+.mlens .ml-select {
+    width: 100%; height: 32px; padding: 0 8px;
+    border: 1px solid var(--ml-border-strong); border-radius: var(--ml-radius-sm);
+    background: var(--ml-surface); color: var(--ml-text); font: inherit; font-size: 12.5px;
+}
+.mlens .ml-select:focus { border-color: var(--ml-accent); outline: none; }
+.mlens .ml-aiset-same { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; }
+.mlens .ml-aiset-warn { font-size: 12px; color: var(--ml-recalled); }
+.mlens .ml-ask { display: flex; flex-direction: column; gap: 10px; }
+.mlens .ml-ask-text { font-size: 13px; color: var(--ml-text-muted); }
+.mlens .ml-ask-input { min-height: 72px; }

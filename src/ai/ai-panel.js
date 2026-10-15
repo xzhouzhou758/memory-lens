@@ -2,14 +2,17 @@
 //
 // AI 助手 panel for the structure editor. The user describes a change in
 // plain words; the AI edits a working copy of the schema with memory-graph's
-// own tools. Each turn's result lands in the editor as unsaved changes, with
-// a Chinese summary and 撤销这一轮. Nothing is written until 保存.
+// own tools. Each turn ends with an item-level change list: with 自动应用 it
+// lands in the editor at once (撤销这一轮 available), otherwise the user ticks
+// what to apply. Applied changes are still unsaved until 保存.
 
 import { h, clear, put } from '../util.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
 import { button, iconButton } from '../ui/components.js';
 import { runTurn, newSession, sessionTitle, upsertSession, toolCallText, isEditTool, markRolledBack, makeId } from './ai-model.js';
+import { diffSchemas, changeTarget } from './schema-diff.js';
+import { changeList } from './change-list.js';
 
 const SUGGESTIONS = [
     '加一个「物品」类型，记录名称、持有人、当前状态',
@@ -17,12 +20,14 @@ const SUGGESTIONS = [
     '把每一项的说明改得更清楚、更简短',
 ];
 const ROLLED_BACK = { status: 'rolled_back', message: 'The user undid this edit; the working draft no longer contains it.' };
+const DISCARDED = { status: 'rejected', message: 'The user did not apply this edit; the working draft does not contain it.' };
+const PREF_KEY = 'memoryLens.aiAutoApply';
 
 /**
  * @param {object} access source.ai
- * @param {{ getLive(): object[], applyLive(types: object[]): void, snapshot(): any,
- *   restore(snap: any): void, describe(before: any, after: any): { name: string, kind: string, lines: string[] }[],
- *   onClose(): void, onBusy(busy: boolean): void }} host
+ * @param {{ getLive(): object[], labels(): object, applyChanges(changes: object[]): void,
+ *   snapshot(): any, restore(snap: any): void, touched(): Set<string>, focusChange(change: object): void,
+ *   onClose(): void, onBusy(busy: boolean): void, openSettings(): void }} host
  */
 export function createAiPanel(access, host) {
     const log = h('div', { class: 'ml-ai-log', role: 'log', 'aria-live': 'polite' });
@@ -45,20 +50,37 @@ export function createAiPanel(access, host) {
         h('span', { class: 'ml-ai-mark', 'aria-hidden': 'true' }, icon('sparkle', { size: 15 })),
         h('span', { class: 'ml-ai-title', text: t('aiTitle') }),
         h('span', { class: 'ml-spacer' }),
+        iconButton('gear', t('aiSettings'), () => host.openSettings(), { className: 'ml-iconbtn-sm' }),
         iconButton('clock', t('aiHistory'), () => toggleHistory(), { className: 'ml-iconbtn-sm' }),
         iconButton('plus', t('aiNew'), () => startNew(), { className: 'ml-iconbtn-sm' }),
         iconButton('x', t('close'), () => host.onClose(), { className: 'ml-iconbtn-sm' }));
+    let autoApply = readAutoApply();
+    const autoBox = h('button', {
+        type: 'button',
+        role: 'checkbox',
+        class: 'ml-check',
+        'aria-checked': String(autoApply),
+        'aria-labelledby': 'ml-ai-auto-label',
+        onClick: () => {
+            autoApply = !autoApply;
+            autoBox.setAttribute('aria-checked', String(autoApply));
+            try { localStorage.setItem(PREF_KEY, autoApply ? '1' : '0'); } catch { /* ignore */ }
+        },
+    }, icon('check', { size: 11 }));
+    const autoRow = h('label', { class: 'ml-ai-auto', onClick: (e) => { if (e.target !== autoBox && !autoBox.contains(e.target)) autoBox.click(); } },
+        autoBox, h('span', { id: 'ml-ai-auto-label', text: t('aiAutoApply') }), h('span', { class: 'ml-ai-auto-note', text: t('aiAutoApplyNote') }));
     const el = h('aside', { class: 'ml-ai', 'aria-label': t('aiTitle') },
         head, historyBox, log,
         h('div', { class: 'ml-ai-compose' }, input, sendBtn),
-        h('p', { class: 'ml-ai-foot', text: t('aiFoot') }));
+        h('div', { class: 'ml-ai-foot' }, autoRow, h('span', { text: t('aiFoot') })));
 
     let sessions = [];
     let session = newSession();
     let busy = false;
     let controller = null;
     let status = 'idle'; // idle | ready | unsupported
-    // Per assistant-turn: { endId, before, after, changes } keyed by the user message id.
+    let aiLive = null; // the AI's working copy (includes not-yet-applied edits)
+    // Per user turn: { endId, ids, before, changes, state, applied:Set, stale:Set }.
     const turns = new Map();
 
     function fit() {
@@ -116,12 +138,15 @@ export function createAiPanel(access, host) {
             }
             const calls = (m.toolCalls || []);
             const results = new Map((m.toolResults || []).map(r => [String(r.tool_call_id), r]));
+            const reads = calls.filter(c => !isEditTool(c.name)).length;
+            const edits = calls.filter(c => isEditTool(c.name));
             put(log, h('div', { class: `ml-ai-msg is-ai ${m.rolledBack ? 'is-rolled' : ''}`.trim() },
-                calls.length ? h('ul', { class: 'ml-ai-tools' }, calls.map(c => {
+                reads ? h('div', { class: 'ml-ai-reads', text: t('aiReadN', reads) }) : null,
+                edits.length ? h('ul', { class: 'ml-ai-tools' }, edits.map(c => {
                     const failed = results.get(String(c.id))?.status === 'fail';
-                    return h('li', { class: failed ? 'is-fail' : '', dataset: { kind: isEditTool(c.name) ? 'edit' : 'read' } },
-                        icon(failed ? 'alert' : isEditTool(c.name) ? 'check' : 'eye', { size: 12 }),
-                        h('span', { text: toolCallText(c) }));
+                    return h('li', { class: failed ? 'is-fail' : '', dataset: { kind: 'edit' } },
+                        icon(failed ? 'alert' : 'blocks', { size: 12 }),
+                        h('span', { text: failed ? t('aiToolFailed', toolCallText(c)) : toolCallText(c) }));
                 })) : null,
                 m.content ? h('div', { class: 'ml-ai-text', text: m.content }) : null));
             const turn = [...turns.values()].find(x => x.endId === m.id);
@@ -133,14 +158,44 @@ export function createAiPanel(access, host) {
 
     function turnCard(turn) {
         if (!turn.changes.length) return null;
-        return h('section', { class: `ml-ai-turn ${turn.undone ? 'is-undone' : ''}`.trim() },
-            h('div', { class: 'ml-ai-turn-head' },
-                h('span', { text: turn.undone ? t('aiTurnUndone') : t('aiTurnChanged') }),
-                turn.undone ? null : button(t('aiUndoTurn'), () => undoTurn(turn), { iconName: 'undo', className: 'ml-btn-sm ml-btn-ghost' })),
-            h('ul', { class: 'ml-ai-turn-list' }, turn.changes.map(change => h('li', null,
-                h('span', { class: 'ml-ai-turn-kind', dataset: { kind: change.kind }, text: change.kind === 'added' ? '新建' : change.kind === 'removed' ? '删除' : '修改' }),
-                h('span', { class: 'ml-ai-turn-name', text: change.name || t('schemaNewType') }),
-                h('span', { class: 'ml-ai-turn-lines', text: change.lines.join('；') })))));
+        // Changes to items the user has since edited by hand can't be applied safely.
+        const stale = new Set(turn.state === 'pending'
+            ? turn.changes.filter(c => host.touched().has(changeTarget(c)) && !turn.touchedAtEnd.has(changeTarget(c))).map(c => c.id)
+            : []);
+        return changeList({
+            changes: turn.changes,
+            state: turn.state,
+            applied: turn.applied,
+            stale,
+            onApply: (chosen) => applyTurn(turn, chosen),
+            onDiscard: () => discardTurn(turn),
+            onUndo: turn.state === 'applied' ? () => undoTurn(turn) : null,
+            onFocus: (change) => host.focusChange(change),
+        });
+    }
+
+    function applyTurn(turn, chosen) {
+        turn.before = host.snapshot();
+        host.applyChanges(chosen);
+        turn.applied = new Set(chosen.map(c => c.id));
+        turn.state = 'applied';
+        if (chosen.length < turn.changes.length) {
+            // Tell the AI which proposals did not make it, then let it re-read.
+            const skipped = turn.changes.filter(c => !turn.applied.has(c.id)).map(c => c.text);
+            markRolledBack(session.messages, turn.ids, { status: 'partially_applied', message: `The user applied only some edits. Not applied: ${skipped.join('; ')}. Re-read the schema before further edits.` });
+            session.messages.push({ id: makeId('msg'), role: 'note', content: t('aiAppliedSome', chosen.length, turn.changes.length), at: Date.now() });
+        }
+        aiLive = null;
+        persist();
+        paint();
+    }
+
+    function discardTurn(turn) {
+        turn.state = 'discarded';
+        markRolledBack(session.messages, turn.ids, DISCARDED);
+        aiLive = null; // the AI's copy contained these edits; restart from the editor
+        persist();
+        paint();
     }
 
     async function send() {
@@ -151,22 +206,32 @@ export function createAiPanel(access, host) {
         const userMsg = { id: makeId('msg'), role: 'user', content: text, at: Date.now() };
         if (!session.messages.length) session.title = sessionTitle(text);
         session.messages.push(userMsg);
-        const before = host.snapshot();
         busy = true;
         host.onBusy(true);
         controller = new AbortController();
         paint();
         const firstAi = session.messages.length;
+        // The AI edits its own copy; the editor only changes when changes are applied.
+        // A turn still waiting for review means the AI's copy is ahead of the editor.
+        const pending = [...turns.values()].some(x => x.state === 'pending');
+        const startCopy = pending && aiLive ? aiLive : host.getLive();
         try {
             const out = await runTurn(access.round, session, {
-                live: host.getLive(),
+                live: startCopy,
                 signal: controller.signal,
-                onUpdate: (live) => { host.applyLive(live); paint(); },
+                onUpdate: () => paint(),
             });
-            const after = host.snapshot();
+            aiLive = out.live;
             const endId = session.messages[session.messages.length - 1]?.id;
             const ids = session.messages.slice(firstAi).map(m => m.id);
-            if (out.changed) turns.set(userMsg.id, { endId, ids, before, after, changes: host.describe(before, after), undone: false });
+            // Diff against the editor so a pending earlier turn's edits show again here.
+            const changes = diffSchemas(host.getLive(), out.live, host.labels());
+            for (const x of turns.values()) if (x.state === 'pending') { x.state = 'superseded'; }
+            if (changes.length) {
+                const turn = { endId, ids, before: host.snapshot(), changes, state: 'pending', applied: new Set(), touchedAtEnd: new Set(host.touched()) };
+                turns.set(userMsg.id, turn);
+                if (autoApply) applyTurn(turn, changes);
+            }
         } catch (err) {
             if (err?.name !== 'AbortError' && !controller?.signal.aborted) {
                 session.messages.push({ id: makeId('msg'), role: 'note', content: t('aiFailed', String(err?.message || err)), at: Date.now() });
@@ -188,9 +253,10 @@ export function createAiPanel(access, host) {
 
     function undoTurn(turn) {
         // Only the latest live turn can be undone cleanly; later turns built on it.
-        const later = [...turns.values()].filter(x => !x.undone && session.messages.findIndex(m => m.id === x.endId) > session.messages.findIndex(m => m.id === turn.endId));
-        for (const x of [turn, ...later]) x.undone = true;
+        const later = [...turns.values()].filter(x => x.state === 'applied' && session.messages.findIndex(m => m.id === x.endId) > session.messages.findIndex(m => m.id === turn.endId));
+        for (const x of [turn, ...later]) x.state = 'undone';
         host.restore(turn.before);
+        aiLive = null;
         markRolledBack(session.messages, [turn, ...later].flatMap(x => x.ids), ROLLED_BACK);
         session.messages.push({ id: makeId('msg'), role: 'note', content: later.length ? t('aiUndoneMany', later.length + 1) : t('aiUndoneOne'), at: Date.now() });
         persist();
@@ -207,6 +273,7 @@ export function createAiPanel(access, host) {
         if (busy) return;
         session = newSession();
         turns.clear();
+        aiLive = null;
         historyBox.hidden = true;
         paint();
         input.focus();
@@ -228,6 +295,7 @@ export function createAiPanel(access, host) {
                     if (busy) return;
                     session = structuredClone(s);
                     turns.clear();
+                    aiLive = null;
                     historyBox.hidden = true;
                     paint();
                 },
@@ -247,9 +315,14 @@ export function createAiPanel(access, host) {
         isBusy: () => busy,
         /** The editor reloaded from storage: earlier turn snapshots no longer apply. */
         reset() {
-            for (const turn of turns.values()) turn.undone = true;
+            for (const turn of turns.values()) if (turn.state !== 'discarded') turn.state = turn.state === 'pending' ? 'discarded' : 'undone';
+            aiLive = null;
             if (status === 'ready') paint();
         },
         destroy() { controller?.abort(); },
     };
+}
+
+function readAutoApply() {
+    try { return localStorage.getItem(PREF_KEY) === '1'; } catch { return false; }
 }

@@ -55,6 +55,7 @@ const PATHS = {
     arrowUp: 'M12 19V5M6 11l6-6 6 6',
     arrowDown: 'M12 5v14M6 13l6 6 6-6',
     alert: `${circle(12, 12, 9)}M12 7.5v5.5M12 16.5v.01`,
+    gear: `M4 7h9M17 7h3M4 17h3M11 17h9${circle(15, 7, 2)}${circle(9, 17, 2)}`,
 };
 
 export function icon(name, { size = 16, className = '', label = '' } = {}) {

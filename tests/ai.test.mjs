@@ -65,12 +65,17 @@ test('toolCallText names the target in Chinese', () => {
     assert.equal(toolCallText({ name: 'mg_schema_read_fields', args: {} }), '查看当前结构');
 });
 
-test('rewrite prompts carry the field instruction and forbid new facts', async () => {
-    const { rewriteSystemPrompt, rewriteUserPrompt } = await import('../src/ai/ai-model.js');
-    assert.match(rewriteSystemPrompt('memoryValue'), /Do NOT add facts/);
+test('built-in structure prompts explain the parts and keep keys', async () => {
+    const { rewriteSystemPrompt, rewriteUserPrompt, suggestSystemPrompt, suggestUserPrompt } = await import('../src/ai/ai-model.js');
     assert.match(rewriteSystemPrompt('columnHint'), /field instruction/);
-    const user = rewriteUserPrompt({ kind: 'memoryValue', text: '原文', typeName: '角色', itemName: '目标', instruction: '一句话 40 字内', siblings: ['林书瑶', '周派'] });
-    assert.match(user, /Field instruction: 一句话 40 字内/);
-    assert.match(user, /Known names: 林书瑶、周派/);
-    assert.ok(user.endsWith('原文'));
+    assert.match(rewriteSystemPrompt('typeIntro'), /extractHint/);
+    assert.match(rewriteUserPrompt({ kind: 'columnHint', text: '' }), /empty/);
+    const sys = suggestSystemPrompt();
+    assert.match(sys, /existing column key unchanged/);
+    assert.match(sys, /alwaysInject/);
+    assert.match(sys, /Simplified Chinese/);
+    const user = suggestUserPrompt({ spec: { id: 'todo', label: '待办', tableColumns: ['title'], columnHints: { title: '显示名' } }, others: [{ id: 'character_sheet', label: '角色', tableColumns: ['title'] }], request: '要记截止时间' });
+    assert.match(user, /要记截止时间/);
+    assert.match(user, /"id": "todo"/);
+    assert.match(user, /character_sheet/);
 });

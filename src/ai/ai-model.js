@@ -133,45 +133,111 @@ export function markRolledBack(messages, ids, payload) {
         for (const r of m.toolResults) {
             if (editIds.has(String(r.tool_call_id)) && r.status === 'ok') r.content = payload;
         }
-        m.rolledBack = true;
+        if (payload?.status === 'rolled_back' || payload?.status === 'rejected') m.rolledBack = true;
     }
 }
 
-// ----- One-shot rewrite ("AI 优化") -----------------------------------------
+// ----- Built-in prompts for the structure tools ---------------------------
+//
+// How memory-graph uses a type, so the AI writes things that work:
+// - extractHint (类型说明): read by the extraction model to decide whether a
+//   fact belongs to this type and when to create / update an entry.
+// - columnHints (每个记录项的「给 AI 的提示」): the instruction the extractor
+//   follows when filling that item. Format, length, allowed values, how to
+//   name people consistently with other types.
+// - requiredColumns: the extractor must always fill these.
+// - alwaysInject: every entry goes into every reply's context (use for few,
+//   important entries: threads, rules, current goals). Costs context.
+// - latestOnly + primaryKeyColumns: one entry per identity (a person, a
+//   place); new info overwrites. Good for "current state" types.
+// - compression hierarchical: older entries fold into summaries (events).
+
+const SCHEMA_PRIMER = [
+    'Context: a role-play memory system stores facts from the chat as typed entries ("memory types"). An extraction LLM reads each type\'s description and per-field instructions and fills entries; on later turns relevant entries are recalled into the chat model\'s context.',
+    'Parts of a type:',
+    '- extractHint: tells the extractor what belongs to this type and when to create or update an entry. 1–2 sentences.',
+    '- tableColumns + columnHints: the fields of an entry and, per field, the instruction the extractor follows (what to write, format, length, allowed values, how to spell names so they match other types).',
+    '- requiredColumns: fields the extractor must always fill. Keep this small (the identity field and the core fact).',
+    '- alwaysInject: every entry is put into every reply. Only for a few important entries (open threads, standing rules, active promises). It costs context.',
+    '- latestOnly + primaryKeyColumns: keep one entry per identity (e.g. per person or place); newer information overwrites. Use for "current state" types; primaryKeyColumns must be the identity field(s).',
+    '- compression.mode "hierarchical": old entries are folded into summaries. Only useful for high-volume, append-only types such as events.',
+];
 
 const REWRITE_RULES = {
-    memoryValue: [
-        'You polish one stored field of a long-term memory graph used by a role-play memory system.',
-        'Downstream readers are LLMs: the extractor that updates this memory and the chat model that receives it on recall.',
-        'Rewrite the value so it follows the field instruction exactly (format, length, required parts), states facts plainly and unambiguously, and uses the same spelling for people / places as the known names given.',
-        'Do NOT add facts, guesses or details that are not in the original. Do not drop facts. Keep it in Simplified Chinese unless the original is in another language.',
-        'Keep list-like values as a list separated by "、". Keep line breaks and section labels of multi-paragraph values.',
-    ],
     columnHint: [
-        'You improve one field instruction in a memory schema. The instruction is read by an extraction LLM that fills this field from role-play chat.',
-        'Make it clear, concrete and short: what to write, the format/length, and what to leave out. One to three sentences.',
-        'Keep every constraint already present (cross-references to other tables, macros like {{user}}, enumerations). Do not invent new requirements.',
-        'Write in Simplified Chinese; keep code-like tokens unchanged.',
+        ...SCHEMA_PRIMER,
+        '',
+        'Task: improve ONE field instruction (columnHint). Make it clear, concrete and short: what to write, the format/length, allowed values, and what to leave empty. One to three sentences.',
+        'Keep every constraint already present (cross-references to other types, macros like {{user}}, enumerations). Do not invent unrelated requirements.',
     ],
     typeIntro: [
-        'You improve the description of one memory type in a memory schema. An extraction LLM reads it to decide which facts belong to this type.',
-        'Make it clear and short (one or two sentences): what this type records and when to create or update an entry. Keep existing constraints.',
-        'Write in Simplified Chinese; keep code-like tokens unchanged.',
+        ...SCHEMA_PRIMER,
+        '',
+        'Task: improve ONE type description (extractHint): what this type records and when to create or update an entry. One or two sentences. Keep existing constraints.',
     ],
 };
 
+const OUTPUT_LANGUAGE = 'Write all human-readable text (labels, descriptions, instructions) in Simplified Chinese. Keep code-like tokens ({{user}}, table names) unchanged.';
+
 export function rewriteSystemPrompt(kind) {
-    const rules = REWRITE_RULES[kind] || REWRITE_RULES.memoryValue;
-    return [...rules, 'Return the result by calling submit_text once with only the rewritten text.'].join('\n');
+    const rules = REWRITE_RULES[kind] || REWRITE_RULES.columnHint;
+    return [...rules, OUTPUT_LANGUAGE, 'Return the result by calling submit_text once with only the rewritten text.'].join('\n');
 }
 
-export function rewriteUserPrompt({ kind, text, typeName = '', itemName = '', instruction = '', siblings = [], context = '' }) {
+export function rewriteUserPrompt({ kind, text, typeName = '', itemName = '', siblings = [] }) {
     const lines = [];
     if (typeName) lines.push(`Memory type: ${typeName}`);
     if (itemName) lines.push(`Field: ${itemName}`);
-    if (kind === 'memoryValue' && instruction) lines.push(`Field instruction: ${instruction}`);
-    if (siblings.length) lines.push(`${kind === 'memoryValue' ? 'Known names' : 'Other fields of this type'}: ${siblings.slice(0, 40).join('、')}`);
-    if (context) lines.push(`Other fields of this entry:\n${context}`);
-    lines.push('', 'Original:', String(text || ''));
+    if (siblings.length) lines.push(`Other fields of this type: ${siblings.slice(0, 40).join('、')}`);
+    lines.push('', kind === 'typeIntro' ? 'Current description:' : 'Current instruction:', String(text || '') || '(empty — write one)');
     return lines.join('\n');
+}
+
+export function suggestSystemPrompt() {
+    return [
+        ...SCHEMA_PRIMER,
+        '',
+        'Task: complete and improve ONE memory type so it records well. Call mg_schema_set_node_type exactly once with the full improved type (same id).',
+        'Do:',
+        '- Give it a clear Chinese label and a 1–2 sentence extractHint.',
+        '- Propose the fields an entry needs (usually 4–9). The first field should identify the entry (e.g. title: 显示名). Each field gets a columnHint with what to write, format and length.',
+        '- Mark only essential fields as required.',
+        '- Choose alwaysInject / latestOnly / compression deliberately using the rules above; set primaryKeyColumns when latestOnly is on.',
+        'Keep:',
+        '- Every existing column key unchanged (you may rewrite its hint). Do not delete existing fields unless the user asked; new keys must be snake_case ASCII.',
+        '- extractionInstructions, keywords and other advanced fields as they are (omit them).',
+        '- Consistency with the other types listed (use their field names when referring to people / places).',
+        OUTPUT_LANGUAGE,
+        'After the tool call, reply with one short Chinese sentence summarising the main idea.',
+    ].join('\n');
+}
+
+const briefType = (t) => {
+    const hints = t.columnHints || {};
+    const cols = (t.tableColumns || []).map(k => `${k}${hints[k] ? `（${String(hints[k]).slice(0, 40)}）` : ''}`).join('、');
+    return `- ${t.id} 「${t.label || t.id}」: ${cols}`;
+};
+
+export function suggestUserPrompt({ spec, others = [], request = '' }) {
+    const current = spec ? {
+        id: spec.id,
+        label: spec.label,
+        extractHint: spec.extractHint,
+        tableColumns: spec.tableColumns,
+        columnHints: spec.columnHints,
+        requiredColumns: spec.requiredColumns,
+        primaryKeyColumns: spec.primaryKeyColumns,
+        alwaysInject: spec.alwaysInject,
+        latestOnly: spec.latestOnly,
+        compression: { mode: spec.compression?.mode || 'none' },
+    } : {};
+    return [
+        request.trim() ? `User request: ${request.trim()}` : 'User request: (none — use your judgement to make this type complete and useful)',
+        '',
+        'Type to complete (JSON):',
+        JSON.stringify(current, null, 2),
+        '',
+        'Other types in this schema (for consistency):',
+        others.map(briefType).join('\n') || '(none)',
+    ].join('\n');
 }

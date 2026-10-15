@@ -150,3 +150,7 @@
 .mlens.is-compact .ml-ai { position: absolute; inset: 0; z-index: 5; border-left: 0; }
 .mlens.is-compact .ml-ai-foot { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 .mlens.is-compact .ml-toast { left: 12px; right: 12px; transform: none; bottom: calc(68px + env(safe-area-inset-bottom)); white-space: normal; }
+.mlens.is-compact .ml-aiset-fields { grid-template-columns: 1fr; }
+.mlens.is-compact .ml-schema-typehead { flex-wrap: wrap; }
+.mlens.is-compact .ml-select { height: 40px; }
+.mlens.is-compact .ml-check { width: 20px; height: 20px; }
