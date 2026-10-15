@@ -9,7 +9,7 @@ import { h, clear, truncate, put } from '../util.js';
 import { icon } from '../icons.js';
 import { t, typeLabel, fieldLabel, depthLabel } from '../i18n.js';
 import { nodePassesFilters, contextState, formatFloor, fieldText, compareTimeline } from '../model.js';
-import { segmented, contextBadge, emptyState, typeDot } from '../ui/components.js';
+import { segmented, contextBadge, emptyState, typeDot, isTouch } from '../ui/components.js';
 
 const PAGE = 200;
 
@@ -69,6 +69,7 @@ export function createTableView(app) {
             put(scroller, emptyState('table', model.nodes.size ? t('emptyFilter') : t('emptyGraph')));
             return;
         }
+        if (app.canEdit?.() && isTouch()) put(head, h('p', { class: 'ml-table-touchhint', text: t('editTableTouch') }));
         put(head, segmented(available.map(type => ({
             value: type,
             label: typeLabel(type),

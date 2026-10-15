@@ -9,7 +9,7 @@
 import { h, clear, put } from '../util.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
-import { button, iconButton } from '../ui/components.js';
+import { button, iconButton, checkRow, isTouch } from '../ui/components.js';
 import { runTurn, newSession, sessionTitle, upsertSession, toolCallText, isEditTool, markRolledBack, makeId } from './ai-model.js';
 import { diffSchemas, changeTarget } from './schema-diff.js';
 import { changeList } from './change-list.js';
@@ -38,7 +38,7 @@ export function createAiPanel(access, host) {
         'aria-label': t('aiPlaceholder'),
         onInput: () => fit(),
         onKeydown: (event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+            if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !isTouch()) {
                 event.preventDefault();
                 send();
             }
@@ -55,24 +55,20 @@ export function createAiPanel(access, host) {
         iconButton('plus', t('aiNew'), () => startNew(), { className: 'ml-iconbtn-sm' }),
         iconButton('x', t('close'), () => host.onClose(), { className: 'ml-iconbtn-sm' }));
     let autoApply = readAutoApply();
-    const autoBox = h('button', {
-        type: 'button',
-        role: 'checkbox',
-        class: 'ml-check',
-        'aria-checked': String(autoApply),
-        'aria-labelledby': 'ml-ai-auto-label',
-        onClick: () => {
-            autoApply = !autoApply;
-            autoBox.setAttribute('aria-checked', String(autoApply));
-            try { localStorage.setItem(PREF_KEY, autoApply ? '1' : '0'); } catch { /* ignore */ }
+    const autoRow = checkRow({
+        checked: autoApply,
+        label: t('aiAutoApply'),
+        note: t('aiAutoApplyNote'),
+        className: 'ml-ai-auto',
+        onChange: (value) => {
+            autoApply = value;
+            try { localStorage.setItem(PREF_KEY, value ? '1' : '0'); } catch { /* ignore */ }
         },
-    }, icon('check', { size: 11 }));
-    const autoRow = h('div', { class: 'ml-ai-auto', onClick: (e) => { if (e.target !== autoBox && !autoBox.contains(e.target)) autoBox.click(); } },
-        autoBox, h('span', { id: 'ml-ai-auto-label', text: t('aiAutoApply') }), h('span', { class: 'ml-ai-auto-note', text: t('aiAutoApplyNote') }));
+    });
     const el = h('aside', { class: 'ml-ai', 'aria-label': t('aiTitle') },
         head, historyBox, log,
         h('div', { class: 'ml-ai-compose' }, input, sendBtn),
-        h('div', { class: 'ml-ai-foot' }, autoRow, h('span', { text: t('aiFoot') })));
+        h('div', { class: 'ml-ai-foot' }, autoRow, isTouch() ? null : h('span', { class: 'ml-ai-keys', text: t('aiFoot') })));
 
     let sessions = [];
     let session = newSession();

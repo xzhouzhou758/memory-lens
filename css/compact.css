@@ -154,3 +154,4 @@
 .mlens.is-compact .ml-schema-typehead { flex-wrap: wrap; }
 .mlens.is-compact .ml-select { height: 40px; }
 .mlens.is-compact .ml-check { width: 20px; height: 20px; }
+.mlens.is-compact .ml-checkrow { padding: 8px; margin: -8px; font-size: 13px; }

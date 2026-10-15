@@ -8,7 +8,7 @@ import { h, clear, copyText, put } from '../util.js';
 import { icon } from '../icons.js';
 import { t, typeLabel, relationLabel, fieldLabel, depthLabel } from '../i18n.js';
 import { neighborsOf, entitiesOfEvent, contextState, formatFloor, fieldText, compareTimeline, typeVisual } from '../model.js';
-import { iconButton, nodeLink, contextBadge, sectionTitle, typeChip, emptyState, button } from '../ui/components.js';
+import { iconButton, nodeLink, contextBadge, sectionTitle, typeChip, emptyState, button, isTouch, withMod } from '../ui/components.js';
 import { editable } from '../edit/inline-edit.js';
 
 export function createInspector(app) {
@@ -90,7 +90,7 @@ export function createInspector(app) {
         const fieldList = keys.length
             ? h('dl', { class: 'ml-insp-fields' }, keys.map(key => [
                 h('dt', { text: fieldLabel(key, node.type) }),
-                editable(h('dd', { class: fieldText(node.fields[key]).trim() ? null : 'is-empty', text: fieldText(node.fields[key]) || t('editEmpty') }),
+                editable(h('dd', { class: fieldText(node.fields[key]).trim() ? null : 'is-empty', text: fieldText(node.fields[key]) || (isTouch() ? t('editEmptyTouch') : t('editEmpty')) }),
                     { app, node, key, value: node.fields[key], label: fieldLabel(key, node.type) }),
             ]))
             : null;
@@ -117,7 +117,7 @@ export function createInspector(app) {
             h('div', { class: 'ml-insp-overview' },
                 h('div', { class: 'ml-insp-overview-mark' }, icon('lens', { size: 26 })),
                 h('h3', { text: model.chatLabel || t('appName') }),
-                h('p', { class: 'ml-insp-muted', text: t('overviewHint') })),
+                h('p', { class: 'ml-insp-muted', text: isTouch() ? t('overviewHintTouch') : withMod(t('overviewHint')) })),
             block(t('lastRecall'), model.lastRecall
                 ? h('div', { class: 'ml-insp-recall' },
                     previewText(model.lastRecall.blocks?.corePacket),

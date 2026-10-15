@@ -2,11 +2,13 @@
 //
 // Double-click to edit a stored memory value in place.
 // The editor takes the shown value's box: anything that wraps gets a growing
-// textarea at the same width. Enter saves (Shift+Enter = new line); text that
-// already has paragraphs (event bodies) saves with Ctrl/⌘+Enter instead.
-// Esc cancels, clicking away saves. Saving goes through app.editNode (撤销).
+// textarea at the same width. 保存 / 取消 buttons always work (touch screens);
+// with a keyboard, Enter saves (Shift+Enter = new line), paragraph text
+// (event bodies) saves with Ctrl/⌘+Enter, Esc cancels. Clicking away saves.
+// Saving goes through app.editNode (撤销).
 
 import { h } from '../util.js';
+import { button, isTouch, withMod } from '../ui/components.js';
 import { t } from '../i18n.js';
 import { editRule, toEditText, isChanged, hasParagraphs } from './edit-model.js';
 import { restoreSummaryLayout } from '../model.js';
@@ -24,7 +26,16 @@ export function editable(el, { app, node, key, value, label = '' }) {
     const rule = editRule(node, key);
     el.classList.add('ml-editable');
     el.dataset.editable = rule.ok ? 'true' : 'false';
-    el.title = rule.ok ? t('editHint') : rule.reason;
+    el.title = rule.ok ? (isTouch() ? t('editHintTouch') : t('editHint')) : rule.reason;
+    // Touch screens can't double-click reliably: a single tap edits fields in
+    // the details pane (table cards keep "tap = open details").
+    el.addEventListener('click', (event) => {
+        if (!isTouch() || el.classList.contains('is-editing') || !el.closest('.ml-inspector')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!rule.ok) { app.notify?.(rule.reason); return; }
+        open(el, { app, node, key, value, label });
+    });
     el.addEventListener('dblclick', (event) => {
         if (el.classList.contains('is-editing')) return;
         event.preventDefault();
@@ -65,8 +76,13 @@ function open(el, { app, node, key, value, label }) {
         ...(multiline ? { rows: 2 } : { type: 'text' }),
     });
     field.value = text;
-    const hint = h('span', { class: 'ml-inline-hint', text: paragraphs ? t('editKeysMulti') : multiline ? t('editKeysWrap') : t('editKeys') });
-    const foot = h('span', { class: 'ml-inline-foot' }, hint);
+    const touch = isTouch();
+    const hint = touch ? null : h('span', { class: 'ml-inline-hint', text: withMod(paragraphs ? t('editKeysMulti') : multiline ? t('editKeysWrap') : t('editKeys')) });
+    const foot = h('span', { class: 'ml-inline-foot' },
+        hint,
+        h('span', { class: 'ml-inline-actions' },
+            button(t('schemaCancel'), () => cancel(), { className: 'ml-btn-sm ml-btn-ghost' }),
+            button(t('editSave'), () => { commit(); el.focus?.(); }, { iconName: 'check', className: 'ml-btn-sm ml-btn-primary' })));
     const wrap = h('span', { class: `ml-inline ${multiline ? 'is-multi' : ''}`.trim(), onClick: (e) => e.stopPropagation(), onDblclick: (e) => e.stopPropagation() }, field, foot);
     // Cells keep their element (table / list layout stays intact); the editor
     // replaces their content. Inline values are swapped out whole.
@@ -108,7 +124,7 @@ function open(el, { app, node, key, value, label }) {
         if (event.key === 'Escape') {
             event.preventDefault();
             cancel();
-        } else if (event.key === 'Enter' && !event.isComposing && (paragraphs ? (event.ctrlKey || event.metaKey) : !event.shiftKey)) {
+        } else if (event.key === 'Enter' && !event.isComposing && !touch && (paragraphs ? (event.ctrlKey || event.metaKey) : !event.shiftKey)) {
             event.preventDefault();
             commit();
             el.focus?.();

@@ -30,10 +30,11 @@ export function changeList(opts) {
     function row(change) {
         const isStale = stale.has(change.id);
         const done = state !== 'pending';
+        // The box sits in a padded hit area so it's easy to tap.
         const box = h('button', {
             type: 'button',
             role: 'checkbox',
-            class: 'ml-check',
+            class: 'ml-check ml-check-hit',
             'aria-checked': String(done ? applied.has(change.id) : chosen.has(change.id)),
             'aria-label': change.text,
             disabled: done || isStale,
@@ -51,8 +52,11 @@ export function changeList(opts) {
             class: 'ml-change-text',
             onClick: () => {
                 if (detail) {
+                    // Text with a before / after: tap to read it (and jump to the item).
                     detail.hidden = !detail.hidden;
                     caret?.replaceWith(caret = icon(detail.hidden ? 'chevronDown' : 'chevronUp', { size: 12, className: 'ml-change-caret' }));
+                } else if (!box.disabled) {
+                    box.click(); // nothing to expand: tapping the text toggles the box
                 }
                 onFocus?.(change);
             },

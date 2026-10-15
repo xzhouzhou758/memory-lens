@@ -98,7 +98,55 @@ export function sectionTitle(text, extra = null) {
 }
 
 export function kbd(...keys) {
-    return h('span', { class: 'ml-kbd-group' }, keys.map(key => h('kbd', { class: 'ml-kbd', text: key })));
+    return h('span', { class: 'ml-kbd-group' }, keys.map(key => h('kbd', { class: 'ml-kbd', text: modKey(key) })));
+}
+
+// ----- Platform -------------------------------------------------------------
+
+/** macOS / iOS use ⌘ for shortcuts; everything else uses Ctrl. */
+export function isMac() {
+    const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+    return /Mac|iPhone|iPad|iPod/i.test(platform);
+}
+
+/** Touch-first device (phone / tablet): no physical keyboard assumed. */
+export function isTouch() {
+    return Boolean(globalThis.matchMedia?.('(hover: none) and (pointer: coarse)').matches);
+}
+
+/** 'Mod' → ⌘ on Mac, Ctrl elsewhere. */
+export function modKey(key = 'Mod') {
+    return key === 'Mod' ? (isMac() ? '⌘' : 'Ctrl') : key;
+}
+
+/** Replaces {mod} in a hint string with the platform's modifier. */
+export function withMod(text) {
+    return String(text).replace(/\{mod\}/g, modKey());
+}
+
+/**
+ * Checkbox with its text: clicking anywhere on the row toggles it once.
+ * @param {{ checked: boolean, label: string, note?: string, onChange(value: boolean): void, className?: string }} opts
+ */
+export function checkRow({ checked, label, note = '', onChange, className = '' }) {
+    let value = Boolean(checked);
+    const box = h('span', { class: 'ml-check', 'aria-hidden': 'true' }, icon('check', { size: 11 }));
+    const row = h('button', {
+        type: 'button',
+        role: 'checkbox',
+        class: `ml-checkrow ${className}`.trim(),
+        'aria-checked': String(value),
+        onClick: () => {
+            value = !value;
+            row.setAttribute('aria-checked', String(value));
+            onChange?.(value);
+        },
+    },
+    box,
+    h('span', { class: 'ml-checkrow-text' },
+        h('span', { class: 'ml-checkrow-label', text: label }),
+        note ? h('span', { class: 'ml-checkrow-note', text: note }) : null));
+    return row;
 }
 
 /** Renders `text` with case-insensitive occurrences of `query` wrapped in <mark>. */

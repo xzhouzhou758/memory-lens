@@ -9,7 +9,7 @@ import { h, clear, put } from '../util.js';
 import { icon } from '../icons.js';
 import { t } from '../i18n.js';
 import { typeVisual } from '../model.js';
-import { button, iconButton, emptyState, segmented } from '../ui/components.js';
+import { button, iconButton, emptyState, segmented, checkRow } from '../ui/components.js';
 import {
     toDrafts, fromDraft, newColumn, newTypeDraft, labelsFromDrafts, validateDrafts,
     describeChanges, draftsEqual, cloneDrafts,
@@ -767,16 +767,19 @@ export function createSchemaView(app, source) {
                 field(t('aiConnection'), select(state.tools.api, data.connections, followMemory, (v) => { state.tools.api = v; })),
                 field(t('aiPreset'), select(state.tools.preset, data.presets, followPreset, (v) => { state.tools.preset = v; })));
         };
-        const sameBox = h('button', {
-            type: 'button', role: 'checkbox', class: 'ml-check', 'aria-checked': String(state.tools.same),
-            onClick: () => { state.tools.same = !state.tools.same; sameBox.setAttribute('aria-checked', String(state.tools.same)); paintTools(); },
-        }, icon('check', { size: 11 }));
+        const sameRow = checkRow({
+            checked: state.tools.same,
+            label: t('aiSameAsAssistant'),
+            onChange: (value) => { state.tools.same = value; paintTools(); },
+        });
         paintTools();
         if (state.tools.builtinPrompt === undefined) state.tools.builtinPrompt = true;
-        const builtinBox = h('button', {
-            type: 'button', role: 'checkbox', class: 'ml-check', 'aria-checked': String(state.tools.builtinPrompt),
-            onClick: () => { state.tools.builtinPrompt = !state.tools.builtinPrompt; builtinBox.setAttribute('aria-checked', String(state.tools.builtinPrompt)); },
-        }, icon('check', { size: 11 }));
+        const builtinRow = checkRow({
+            checked: state.tools.builtinPrompt,
+            label: t('aiBuiltinPrompt'),
+            note: t('aiBuiltinPromptNote'),
+            onChange: (value) => { state.tools.builtinPrompt = value; },
+        });
         const content = h('div', { class: 'ml-aiset' },
             h('p', { class: 'ml-aiset-intro', text: t('aiSettingsIntro') }),
             h('section', { class: 'ml-aiset-group' },
@@ -788,13 +791,9 @@ export function createSchemaView(app, source) {
             h('section', { class: 'ml-aiset-group' },
                 h('div', { class: 'ml-aiset-title' }, h('span', { text: t('aiToolsTitle') }), testBtn('tools')),
                 h('p', { class: 'ml-aiset-note', text: t('aiSettingsToolsNote') }),
-                h('div', { class: 'ml-aiset-same', onClick: (e) => { if (!sameBox.contains(e.target)) sameBox.click(); } }, sameBox, h('span', { text: t('aiSameAsAssistant') })),
+                sameRow,
                 toolsFields,
-                h('div', { class: 'ml-aiset-same', onClick: (e) => { if (!builtinBox.contains(e.target)) builtinBox.click(); } },
-                    builtinBox,
-                    h('span', { class: 'ml-aiset-check-text' },
-                        h('span', { text: t('aiBuiltinPrompt') }),
-                        h('span', { class: 'ml-aiset-sub', text: t('aiBuiltinPromptNote') })))),
+                builtinRow),
             !data.connections.length ? h('p', { class: 'ml-aiset-warn', text: t('aiNoConnections') }) : null);
         confirmModal({
             title: t('aiSettings'),

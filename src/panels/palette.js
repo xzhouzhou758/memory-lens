@@ -7,7 +7,7 @@ import { h, clear, put } from '../util.js';
 import { icon } from '../icons.js';
 import { t, typeLabel } from '../i18n.js';
 import { searchNodes, formatFloor } from '../model.js';
-import { typeDot, highlight, kbd, contextBadge } from '../ui/components.js';
+import { typeDot, highlight, kbd, contextBadge, iconButton, isTouch } from '../ui/components.js';
 import { contextState } from '../model.js';
 
 export function createPalette(app) {
@@ -30,7 +30,8 @@ export function createPalette(app) {
         h('span', null, kbd('Enter'), ' '),
         h('span', null, kbd('Esc')));
     const panel = h('div', { class: 'ml-palette', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('search') },
-        h('div', { class: 'ml-palette-field' }, icon('search', { size: 18 }), input, kbd('Esc')),
+        h('div', { class: 'ml-palette-field' }, icon('search', { size: 18 }), input,
+            isTouch() ? iconButton('x', t('close'), () => close(), { className: 'ml-iconbtn-sm' }) : kbd('Esc')),
         list,
         footer);
     const el = h('div', { class: 'ml-palette-backdrop', hidden: true, onMousedown: (event) => { if (event.target === el) close(); } }, panel);

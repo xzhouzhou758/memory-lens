@@ -16,7 +16,7 @@ import { createSidebar } from './panels/sidebar.js';
 import { createInspector } from './panels/inspector.js';
 import { createPalette } from './panels/palette.js';
 import { createDialog } from './panels/dialog.js';
-import { iconButton, segmented, emptyState, button, kbd } from './ui/components.js';
+import { iconButton, segmented, emptyState, button, kbd, isTouch } from './ui/components.js';
 import { createSchemaView } from './schema/schema-view.js';
 import { buildLabelMaps } from './schema/schema-model.js';
 import { setDisplayLabels } from './i18n.js';
@@ -204,7 +204,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
         ], state.view, (value) => store.set({ view: value }), { ariaLabel: t('display'), iconOnlyMobile: true }));
         put(clear(topbarRight), 
             h('button', { type: 'button', class: 'ml-searchbtn', onClick: () => palette.open(), 'aria-label': t('search') },
-                icon('search', { size: 15 }), h('span', { class: 'ml-searchbtn-text', text: t('searchHint') }), kbd(isMac() ? '⌘' : 'Ctrl', 'K')),
+                icon('search', { size: 15 }), h('span', { class: 'ml-searchbtn-text', text: t('searchHint') }), kbd('Mod', 'K')),
             syncDot,
             iconButton('refresh', t('refresh'), () => load({ manual: true }), { className: state.syncing ? 'is-spinning' : '' }),
             iconButton(state.theme === 'dark' ? 'sun' : 'moon', t('theme'), () => app.toggleTheme()),
@@ -246,6 +246,7 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
         const state = store.get();
         root.dataset.theme = state.theme;
         root.classList.toggle('is-compact', state.compact);
+        root.classList.toggle('is-touch', isTouch());
         root.classList.toggle('sidebar-open', state.compact ? state.drawer === 'sidebar' : state.sidebarOpen);
         root.classList.toggle('inspector-open', state.compact ? state.drawer === 'inspector' : state.inspectorOpen);
         root.classList.toggle('drawer-open', state.compact && Boolean(state.drawer));
@@ -453,6 +454,4 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
     };
 }
 
-function isMac() {
-    return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
-}
+

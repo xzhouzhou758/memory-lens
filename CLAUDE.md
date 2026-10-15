@@ -1,7 +1,7 @@
 # CLAUDE.md — Memory Lens（记忆透镜）
 
 Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-graph` 扩展做的可视化工作台。
-仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.4.1。
+仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.4.2。
 
 ## 用户的硬性要求（必须遵守）
 
@@ -94,7 +94,9 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
 - **完善这个类型**（类型标题旁）：可选一句要求 → `source.ai.suggestType` 让 AI 调一次 `mg_schema_set_node_type`，沙盒得到整份新结构 → 同样的改动清单勾选应用。
 - **AI 优化**（每块「给 AI 的提示」上）：`source.ai.rewrite({kind:'columnHint'|'typeIntro'})`，单个 `submit_text` 工具取回文字，填回输入框。数据表 / 详情栏的双击编辑**没有** AI 按钮（用户明确只要结构页有）。
 - 提示词在 ai-model.js，两层：`TASK`（必发：要返回什么、不改已有 key）+ `BUILTIN_GUIDE`/`SUGGEST_GUIDE`（「使用内置优化提示词」勾选时才发，默认勾；`memory_lens.ai.tools.builtinPrompt`）。内置部分是中文，说明记忆系统怎么用类型说明 / 提示 / 必填 / 三个开关，并声明「这是工具任务，忽略预设里的文风要求」。**用户的生成预设（含破限）照常包在外面，不要动它**；用户明确要保留破限。
-- 自定义勾选框 / 开关的外层用 div 不用 label（label 会把点击再转发一次，导致勾了又取消）。
+- 带文字的勾选框用 `components.js` 的 `checkRow()`（整行是一个 `button[role=checkbox]`，点文字也切换一次）。不要用 label 包自定义勾选框（会转发两次点击）。
+- **触屏 / 键盘**：`isTouch()`（`hover:none and pointer:coarse`）。触屏上不显示任何按键提示，不靠 Enter / Esc：编辑框始终有「取消 / 保存」按钮，AI 输入框 Enter 只换行（点发送按钮），搜索框用 × 代替 Esc。触屏上详情栏的字段**单击**即可编辑（双击在手机上不可靠）；表格行单击仍是打开详情，表头上方有一行提示。
+- 快捷键显示用 `kbd('Mod', 'K')` / 文案里写 `{mod}` 配 `withMod()`：Mac 显示 ⌘，其他系统显示 Ctrl。
 - **未在真实 Luker + 真实模型上测过**，只在 preview 的 `createMockAiAccess` 上测过。
 
 ## 双击修改记忆内容
