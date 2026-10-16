@@ -176,3 +176,24 @@ test('display labels flow into the read views', () => {
     assert.equal(depthLabel(2), '二级摘要');
     setDisplayLabels({});
 });
+
+import { TEMPLATES, buildTemplate } from '../src/schema/templates.js';
+
+test('templates keep the current event type and produce valid drafts', () => {
+    const defaults = [
+        { id: 'event', label: 'Event', tableColumns: ['summary'], columnHints: { summary: 'x' } },
+        { id: 'character_sheet', label: 'Character Sheet', tableColumns: ['title'] },
+        { id: 'location_state', label: 'Location State', tableColumns: ['title'] },
+        { id: 'thread', label: 'Thread', tableColumns: ['title', 'status', 'note'] },
+    ];
+    const current = [{ id: 'event', label: '我的事件', tableColumns: ['summary'], columnHints: { summary: '自定义' } }];
+    for (const tpl of TEMPLATES) {
+        const { types, labels } = buildTemplate(tpl, current, defaults);
+        assert.equal(types[0].label, '我的事件', tpl.id);
+        const ids = types.map(s => s.id);
+        assert.equal(new Set(ids).size, ids.length, `${tpl.id} has duplicate ids`);
+        const drafts = toDrafts(types, labels, defaults);
+        assert.deepEqual(validateDrafts(drafts), [], tpl.id);
+        for (const spec of types) for (const key of spec.requiredColumns || []) assert.ok(spec.tableColumns.includes(key), `${tpl.id}/${spec.id}/${key}`);
+    }
+});

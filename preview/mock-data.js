@@ -281,6 +281,33 @@ export function createMockSchemaAccess() {
             return true;
         },
         labels: () => structuredClone(labels),
+        // Same file shape as memory-graph's native export.
+        exportFile: async (next, nextLabels = {}) => {
+            const payload = { type: 'luker-memory-graph-schema', version: 1, exportedAt: new Date().toISOString(), scope: 'global', characterName: '', schema: next, memoryLensLabels: nextLabels };
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+            a.download = 'memory-graph-schema-global.json';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+            return a.download;
+        },
+        importFile: () => new Promise((resolve, reject) => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json,application/json';
+            input.addEventListener('change', async () => {
+                const file = input.files?.[0];
+                if (!file) { resolve(null); return; }
+                try {
+                    const parsed = JSON.parse(await file.text());
+                    const list = Array.isArray(parsed) ? parsed : parsed?.type === 'luker-memory-graph-schema' ? parsed.schema : null;
+                    if (!Array.isArray(list) || !list.length) throw new Error('这不是记忆结构文件');
+                    resolve({ types: list, labels: parsed.memoryLensLabels || {} });
+                } catch (err) { reject(err); }
+            }, { once: true });
+            input.addEventListener('cancel', () => resolve(null), { once: true });
+            input.click();
+        }),
     };
 }
 

@@ -655,5 +655,61 @@ function createSchemaAccess(resolveApi) {
                 return {};
             }
         },
+
+        /**
+         * Downloads `types` as a memory-graph schema file (the same format and
+         * file name as the native 导出). Our column names ride along in an
+         * extra field the native importer ignores.
+         */
+        async exportFile(types, labels = {}) {
+            const { ctx, api: mg } = resolveApi();
+            const [main, io] = await Promise.all([loadMain(), loadIo()]);
+            if (typeof ctx.download !== 'function' || typeof io.buildSchemaExportPayload !== 'function') throw new SourceError('schema-unsupported');
+            const info = mg.getSchemaScopeInfo(ctx, main.getSettings());
+            const payload = io.buildSchemaExportPayload(types, info, main.normalizeNodeTypeSchema);
+            if (labels && Object.keys(labels).length) payload.memoryLensLabels = structuredClone(labels);
+            const fileName = io.getSchemaExportFileName(info);
+            ctx.download(JSON.stringify(payload, null, 2), fileName, 'application/json');
+            return fileName;
+        },
+
+        /**
+         * Lets the user pick a schema file and parses it with memory-graph's
+         * own validator. Resolves null if no file was picked.
+         * @returns {Promise<{ types: object[], labels: object }|null>}
+         */
+        async importFile() {
+            const { ctx } = resolveApi();
+            const [main, io] = await Promise.all([loadMain(), loadIo()]);
+            if (typeof io.parseSchemaImportPayload !== 'function') throw new SourceError('schema-unsupported');
+            const file = await pickFile('.json,application/json');
+            if (!file) return null;
+            const text = typeof ctx.getFileText === 'function' ? await ctx.getFileText(file) : await file.text();
+            let parsed;
+            try { parsed = JSON.parse(text); } catch { throw new SourceError('bad-file', '文件不是有效的 JSON'); }
+            let types;
+            try { types = io.parseSchemaImportPayload(parsed, main.normalizeNodeTypeSchema); } catch { throw new SourceError('bad-file', '这不是记忆结构文件'); }
+            const labels = parsed && typeof parsed.memoryLensLabels === 'object' && !Array.isArray(parsed.memoryLensLabels) ? parsed.memoryLensLabels : {};
+            return { types: structuredClone(types), labels: structuredClone(labels) };
+        },
     };
+
+    function loadIo() {
+        return import(`${MG_BASE}/import-export.js`).catch(() => ({}));
+    }
+}
+
+/** Opens the system file picker; resolves the chosen file or null. */
+function pickFile(accept) {
+    return new Promise((resolve) => {
+        // Detached input, same as memory-graph's own importer.
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = accept;
+        let done = false;
+        const finish = (file) => { if (!done) { done = true; resolve(file || null); } };
+        input.addEventListener('change', () => finish(input.files?.[0]), { once: true });
+        input.addEventListener('cancel', () => finish(null), { once: true });
+        input.click();
+    });
 }

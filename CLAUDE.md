@@ -1,7 +1,7 @@
 # CLAUDE.md — Memory Lens（记忆透镜）
 
 Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-graph` 扩展做的可视化工作台。
-仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.4.2。
+仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.5.0。
 
 ## 用户的硬性要求（必须遵守）
 
@@ -83,6 +83,8 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
 - 记录项说明和类型简介都标「给 AI 的提示」（它们就是发给提取 AI 的提示词）。
 - 保存前弹窗列出中文改动摘要（`describeChanges`），保存后 12 秒内可撤销。
 - 允许类型重名（用户的自定义“剧情线”和内置 thread 都叫“剧情线”）。
+- 模板（`src/schema/templates.js`）：套用 = 替换编辑器里的类型列表，仍需保存。「事件」永远保留编辑器当前那份；角色 / 地点 / 剧情线直接用 Luker 默认 spec（带调好的英文规则）；自定义类型 extractionInstructions 为空，说明全是中文。
+- 导入 / 导出走原生 `import-export.js`（buildSchemaExportPayload / parseSchemaImportPayload / getSchemaExportFileName）+ `ctx.download` / `ctx.getFileText`，文件和原生面板互通；我们的列名放在额外字段 `memoryLensLabels`，原生导入会忽略。导入只进编辑器，不自动保存。
 
 ## AI 功能（都只在记忆结构页）
 

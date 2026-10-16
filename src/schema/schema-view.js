@@ -17,6 +17,7 @@ import {
 import { createAiPanel } from '../ai/ai-panel.js';
 import { diffSchemas, applyChanges, changeMarks } from '../ai/schema-diff.js';
 import { changeList } from '../ai/change-list.js';
+import { TEMPLATES, buildTemplate, templateTypeNames } from './templates.js';
 
 const UNDO_MS = 12000;
 
@@ -196,6 +197,12 @@ export function createSchemaView(app, source) {
                 })),
             h('div', { class: 'ml-schema-list-actions' },
                 button(t('schemaAddType'), () => addType(), { iconName: 'plus' }),
+                button(t('schemaTemplates'), () => pickTemplate(), { iconName: 'layers', className: 'ml-btn-ghost' }),
+                access.importFile || access.exportFile
+                    ? h('div', { class: 'ml-schema-io' },
+                        access.importFile ? button(t('schemaImport'), () => importSchema(), { iconName: 'upload', className: 'ml-btn-ghost' }) : null,
+                        access.exportFile ? button(t('schemaExport'), () => exportSchema(), { iconName: 'download', className: 'ml-btn-ghost' }) : null)
+                    : null,
                 button(t('schemaReset'), () => resetDefaults(), { iconName: 'undo', className: 'ml-btn-ghost' })),
         );
     }
@@ -562,6 +569,86 @@ export function createSchemaView(app, source) {
         });
     }
 
+    // Replaces the type list (unsaved); uids of matching types are kept so the
+    // selection and the 未保存 dots behave like a hand edit.
+    function replaceTypes(types, labels = {}) {
+        const fresh = toDrafts(types, { ...(info.labels || {}), ...labels }, info.defaults);
+        for (const draft of fresh) {
+            const prev = drafts.find(d => d.id === draft.id);
+            if (prev) draft.uid = prev.uid;
+        }
+        drafts = fresh;
+        aiMarks = {};
+        errors = [];
+        ai?.reset();
+        if (!drafts.some(d => d.uid === selectedUid)) selectedUid = drafts[0]?.uid || '';
+        pane = 'list';
+        paint();
+    }
+
+    function pickTemplate() {
+        let chosen = TEMPLATES[0].id;
+        const nameOf = (id) => {
+            const spec = drafts.find(d => d.id === id) || null;
+            return spec?.name.trim() || toDrafts([info.defaults.find(d => d.id === id) || { id }])[0].name;
+        };
+        const cards = TEMPLATES.map(tpl => h('button', {
+            type: 'button',
+            role: 'radio',
+            class: 'ml-tpl',
+            'aria-checked': String(tpl.id === chosen),
+            dataset: { id: tpl.id },
+            onClick: () => {
+                chosen = tpl.id;
+                for (const el of wrap.querySelectorAll('.ml-tpl')) el.setAttribute('aria-checked', String(el.dataset.id === chosen));
+            },
+        },
+        h('span', { class: 'ml-tpl-radio', 'aria-hidden': 'true' }),
+        h('span', { class: 'ml-tpl-main' },
+            h('span', { class: 'ml-tpl-name', text: tpl.name }),
+            h('span', { class: 'ml-tpl-note', text: tpl.note }),
+            h('span', { class: 'ml-tpl-types' }, templateTypeNames(tpl, nameOf).map(name => h('span', { class: 'ml-tpl-type', text: name }))))));
+        const wrap = h('div', { class: 'ml-tpls' },
+            h('p', { class: 'ml-ask-text', text: t('schemaTemplatesNote') }),
+            h('div', { role: 'radiogroup', 'aria-label': t('schemaTemplatesTitle'), class: 'ml-tpl-list' }, cards));
+        confirmModal({
+            title: t('schemaTemplatesTitle'),
+            content: wrap,
+            okLabel: t('schemaTemplateApply'),
+            focus: cards[0],
+            onOk: () => {
+                const tpl = TEMPLATES.find(x => x.id === chosen);
+                const { types, labels } = buildTemplate(tpl, drafts.map(fromDraft), info.defaults);
+                replaceTypes(types, labels);
+                showToast(t('schemaTemplateApplied', tpl.name), { tone: 'ok' });
+            },
+        });
+    }
+
+    async function importSchema() {
+        const run = async () => {
+            try {
+                const result = await access.importFile();
+                if (!result) return;
+                replaceTypes(result.types, result.labels);
+                showToast(t('schemaImported'), { tone: 'ok' });
+            } catch (err) {
+                showToast(t('schemaIoFailed', String(err?.message || err)));
+            }
+        };
+        if (!isDirty()) { run(); return; }
+        confirmModal({ title: t('schemaImport'), lines: [t('schemaImportReplace')], okLabel: t('schemaImport'), onOk: run });
+    }
+
+    async function exportSchema() {
+        try {
+            const name = await access.exportFile(drafts.map(fromDraft), currentLabels());
+            showToast(t('schemaExported', name), { tone: 'ok' });
+        } catch (err) {
+            showToast(t('schemaIoFailed', String(err?.message || err)));
+        }
+    }
+
     function useGlobal() {
         confirmModal({
             title: t('schemaUseGlobal'),
@@ -902,10 +989,10 @@ export function createSchemaView(app, source) {
         undoTimer = setTimeout(() => { undoSnapshot = null; hideToast(); }, UNDO_MS);
     }
 
-    function showToast(text, { action = '', onAction = null } = {}) {
+    function showToast(text, { action = '', onAction = null, tone = '' } = {}) {
         clear(toast);
         put(toast,
-            icon(action ? 'check' : 'alert', { size: 15 }),
+            icon(action || tone === 'ok' ? 'check' : 'alert', { size: 15 }),
             h('span', { text }),
             action ? h('button', { type: 'button', class: 'ml-schema-toast-btn', onClick: onAction }, icon('undo', { size: 14 }), h('span', { text: action })) : null);
         toast.hidden = false;

@@ -52,6 +52,8 @@ const PATHS = {
     trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
     undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3',
     check: 'M5 12.5l4.5 4.5L19 7.5',
+    download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+    upload: 'M12 15V4M7 9l5-5 5 5M5 20h14',
     arrowUp: 'M12 19V5M6 11l6-6 6 6',
     arrowDown: 'M12 5v14M6 13l6 6 6-6',
     alert: `${circle(12, 12, 9)}M12 7.5v5.5M12 16.5v.01`,
