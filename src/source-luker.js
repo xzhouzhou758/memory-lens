@@ -10,6 +10,8 @@
 // duplicate state. If the import path ever moves, `load()` reports a clear
 // error instead of crashing the UI.
 
+import { readFilterSettings, writeFilterSettings } from './filter/filter-runtime.js';
+import { SUBMIT_FILTER, diagnoseSystemPrompt, diagnoseUserPrompt, readDiagnosis } from './filter/filter-ai.js';
 import { countTokens, readEntries, clearEntries, TOKENS_EVENT, META_KEY as TOKENS_META_KEY } from './token-stats.js';
 import { buildTaskMessages as aiTaskMessages, rewriteSystemPrompt, rewriteUserPrompt, suggestSystemPrompt, suggestUserPrompt } from './ai/ai-model.js';
 
@@ -196,6 +198,29 @@ export function createLukerSource() {
         schema: createSchemaAccess(resolveApi),
         ai: createAiAccess(resolveApi),
         edit: createEditAccess(resolveApi),
+        filter: createFilterAccess(),
+    };
+}
+
+// ---------------------------------------------------------------------------
+// 标签过滤: settings + sample replies (the scripts live in filter-runtime.js)
+// ---------------------------------------------------------------------------
+
+function createFilterAccess() {
+    return {
+        read: () => readFilterSettings(getContext()),
+        write: (settings) => writeFilterSettings(getContext(), settings),
+        /** Latest AI replies, newest first: { floor, text }. */
+        recentReplies(limit = 8) {
+            const chat = Array.isArray(getContext().chat) ? getContext().chat : [];
+            const out = [];
+            for (let i = chat.length - 1; i >= 0 && out.length < limit; i--) {
+                const m = chat[i];
+                if (!m || m.is_user || m.is_system || !String(m.mes || '').trim()) continue;
+                out.push({ floor: i, text: String(m.mes) });
+            }
+            return out;
+        },
     };
 }
 
@@ -443,6 +468,19 @@ function createAiAccess(resolveApi) {
             const ok = (result?.toolCalls || []).some(c => c?.name === 'submit_text') || Boolean(String(result?.assistantText || '').trim());
             if (!ok) throw new SourceError('ai-empty', 'AI 没有返回内容');
             return true;
+        },
+
+        /** 标签过滤 AI 诊断: proposes a black / white list for one reply. */
+        async diagnoseFilter(sample) {
+            const result = await oneShot('tools', {
+                system: diagnoseSystemPrompt(),
+                user: diagnoseUserPrompt(sample),
+                tools: [SUBMIT_FILTER],
+                allowedNames: ['submit_filter'],
+            });
+            const call = (result?.toolCalls || []).find(c => c?.name === 'submit_filter');
+            if (!call) throw new SourceError('ai-empty', 'AI 没有给出方案');
+            return readDiagnosis(call.args, sample);
         },
 
         /** AI 优化 for one schema text (item hint / type intro). */

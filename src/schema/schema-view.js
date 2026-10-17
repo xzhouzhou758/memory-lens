@@ -18,6 +18,7 @@ import { createAiPanel } from '../ai/ai-panel.js';
 import { diffSchemas, applyChanges, changeMarks } from '../ai/schema-diff.js';
 import { changeList } from '../ai/change-list.js';
 import { TEMPLATES, buildTemplate, templateTypeNames } from './templates.js';
+import { openFilterDialog } from '../filter/filter-panel.js';
 
 const UNDO_MS = 12000;
 
@@ -142,6 +143,7 @@ export function createSchemaView(app, source) {
             scope,
             h('div', { class: 'ml-schema-actions' },
                 statusLine,
+                source.filter ? filterButton() : null,
                 aiAccess && status === 'ready'
                     ? button(t('aiTitle'), () => toggleAi(), { iconName: 'sparkle', className: `ml-schema-aibtn ${aiOpen ? 'is-on' : ''}`.trim() })
                     : null,
@@ -154,6 +156,17 @@ export function createSchemaView(app, source) {
                 h('span', { text: errors[0].message }),
                 errors.length > 1 ? h('span', { class: 'ml-schema-errors-more', text: `等 ${errors.length} 处` }) : null));
         }
+    }
+
+    function filterButton() {
+        let on = false;
+        try { on = Boolean(source.filter.read().enabled); } catch { on = false; }
+        return button(on ? t('filterBtnOn') : t('filterTitle'), () => openFilterDialog({
+            access: source.filter,
+            aiAccess,
+            confirmModal: (opts) => { confirmModal(opts); },
+            showToast: (text, opts) => { showToast(text, opts); paintBar(); },
+        }), { iconName: 'filter', className: `ml-schema-filterbtn ${on ? 'is-on' : ''}`.trim(), title: t('filterBtnHint') });
     }
 
     function typeMeta(draft) {
@@ -1007,7 +1020,7 @@ export function createSchemaView(app, source) {
     }
 
     // ----- Modal ----------------------------------------------------------
-    function confirmModal({ title, lines = [], changes = null, content: custom = null, okLabel, danger = false, onOk, onCancel = null, focus = null }) {
+    function confirmModal({ title, lines = [], changes = null, content: custom = null, okLabel, danger = false, onOk, onCancel = null, focus = null, className = '' }) {
         closeModal();
         const content = custom || (changes
             ? h('ul', { class: 'ml-schema-changes' }, changes.map(change => h('li', { dataset: { kind: change.kind } },
@@ -1016,7 +1029,7 @@ export function createSchemaView(app, source) {
             : h('div', { class: 'ml-schema-confirm-text' }, lines.filter(Boolean).map(line => h('p', { text: line }))));
         modalCancel = onCancel;
         const ok = button(okLabel, async () => { modalCancel = null; closeModal(); await onOk(); }, { className: danger ? 'ml-btn-danger' : 'ml-btn-primary' });
-        const panel = h('div', { class: `ml-dialog ml-schema-modal ${custom ? 'is-wide' : ''}`.trim(), role: 'alertdialog', 'aria-modal': 'true', 'aria-label': title, tabIndex: -1 },
+        const panel = h('div', { class: `ml-dialog ml-schema-modal ${custom ? 'is-wide' : ''} ${className}`.trim(), role: 'alertdialog', 'aria-modal': 'true', 'aria-label': title, tabIndex: -1 },
             h('header', { class: 'ml-dialog-head' }, h('h3', { class: 'ml-dialog-title', text: title })),
             h('div', { class: 'ml-dialog-body' }, content),
             h('footer', { class: 'ml-schema-modal-foot' }, button(t('schemaCancel'), () => closeModal(), { className: 'ml-btn-ghost' }), ok));

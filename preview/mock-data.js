@@ -345,6 +345,13 @@ export function createMockAiAccess() {
         signal?.addEventListener('abort', () => { clearTimeout(timer); reject(Object.assign(new Error('aborted'), { name: 'AbortError' })); });
     });
     return {
+        diagnoseFilter: async (sample) => {
+            await new Promise(r => setTimeout(r, 600));
+            const wrapped = /<content>/.test(sample);
+            return wrapped
+                ? { body: 'wrapped', black: 'think, !--', white: 'content, statusbar', reason: '正文在 <content> 里，思维链里也混了一段假的 <content>，所以先用黑名单删掉 think，再只留 content 和状态栏。', notes: [] }
+                : { body: 'bare', black: 'thinking', white: '', reason: '正文直接写在标签外面，只能用黑名单删掉 thinking。', notes: [] };
+        },
         check: async () => true,
         async settings() {
             return { connections: ['DeepSeek（便宜）', 'Claude 主力'], presets: ['默认', '严谨'], memory: { api: '', preset: '' }, ai: structuredClone(aiSettings) };
@@ -435,5 +442,19 @@ export function createMockEditAccess(onChange) {
             else patches.delete(previous.id);
             onChange?.();
         },
+    };
+}
+
+/** 标签过滤 stand-in for the preview: settings in memory + sample replies. */
+export function createMockFilterAccess() {
+    let settings = { enabled: false, active: 'default', presets: [{ id: 'default', name: '默认', black: '', white: '' }] };
+    const replies = [
+        { floor: 64, text: '<think>\n用户想让林栖去灯塔。先回顾一下：上一轮沈既白给了钥匙，商会的人在码头盯梢。\n这一轮要写夜里的雾、灯塔的门、林栖的犹豫。草稿：<content>（假的正文，不该被记住）</content>\n再检查一下人物语气……\n</think>\n<content>\n雾比昨夜更浓。林栖把那把铜钥匙攥在掌心，指节发白。\n「你确定要上去？」沈既白压低声音。\n她没回答，只是推开了第七灯塔锈住的门。\n</content>\n<statusbar>时间：第三天 深夜 ｜ 地点：第七灯塔 ｜ 体力 62</statusbar>\n<!-- 下一轮可以让灯重新亮起来 -->' },
+        { floor: 62, text: '<thinking>简短想一下：这轮只是过渡。</thinking>\n雨停了，码头上只剩几盏风灯。林栖数着脚步走回旅馆，身后的影子跟了一路。' },
+    ];
+    return {
+        read: () => structuredClone(settings),
+        write: (next) => { settings = structuredClone(next); },
+        recentReplies: () => structuredClone(replies),
     };
 }

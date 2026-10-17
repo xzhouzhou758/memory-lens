@@ -81,6 +81,11 @@ if (!addMenuItem()) {
     setTimeout(() => observer.disconnect(), 120000);
 }
 
+// 标签过滤: registers runtime regex scripts for the plugin lane at startup.
+import('./src/filter/filter-runtime.js')
+    .then(({ startTagFilter }) => startTagFilter(() => globalThis.Luker?.getContext?.() || globalThis.SillyTavern?.getContext?.()))
+    .catch(err => console.warn('[memory-lens] tag filter unavailable', err));
+
 // Token counter: records every generation's injection, even with the lens closed.
 import('./src/token-stats.js')
     .then(({ startRecorder }) => startRecorder(() => globalThis.Luker?.getContext?.() || globalThis.SillyTavern?.getContext?.()))

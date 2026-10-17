@@ -12,7 +12,7 @@
 <body>
     <script type="module">
         import { mountMemoryLens } from '../src/app.js';
-        import { createMockSnapshot, createLargeSnapshot, createMockSchemaAccess, createMockAiAccess, createMockEditAccess } from './mock-data.js';
+        import { createMockSnapshot, createLargeSnapshot, createMockSchemaAccess, createMockFilterAccess, createMockAiAccess, createMockEditAccess } from './mock-data.js';
 
         const params = new URLSearchParams(location.search);
         const scenario = params.get('data') || 'demo';
@@ -40,6 +40,7 @@
             schema: scenario === 'demo' || scenario === 'empty' ? schemaAccess : null,
             ai: scenario === 'demo' || scenario === 'empty' ? createMockAiAccess() : null,
             edit: scenario === 'demo' ? editAccess : null,
+            filter: scenario === 'demo' ? createMockFilterAccess() : null,
             openNative() { return false; },
             clearTokens() { return []; },
         };

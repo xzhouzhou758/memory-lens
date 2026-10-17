@@ -1,7 +1,7 @@
 # CLAUDE.md — Memory Lens（记忆透镜）
 
 Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-graph` 扩展做的可视化工作台。
-仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.6.0。
+仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.7.0。
 
 ## 用户的硬性要求（必须遵守）
 
@@ -14,7 +14,7 @@ Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-grap
 ## 命令
 
 ```bash
-npm test                      # node:test，无依赖，Node ≥ 20（当前 43 个用例）
+npm test                      # node:test，无依赖，Node ≥ 20（当前 58 个用例）
 npm run preview               # http://127.0.0.1:4173/preview/index.html 示例数据
 # 预览参数：?data=demo|large|empty|error  &theme=dark|light  &view=graph|timeline|table|schema  &n=800
 ```
@@ -40,7 +40,8 @@ src/edit/              edit-model.js（纯函数：可改规则、值转换）+ 
 src/ai/                ai-model.js（纯函数：对话循环、内置提示词）、schema-diff.js（纯函数：条目级改动 + 按需应用）、change-list.js（改动清单 UI）、ai-panel.js（AI 助手）
 css/                   tokens → shell → … → schema → compact（≤860px 移动布局，最后加载）
 preview/               独立预览：mock-data.js（原创虚构“雾港”故事 + 模拟 schema 读写）、serve.mjs
-tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.test.mjs、diff.test.mjs
+src/filter/            tag-filter.js（纯函数：解析标签、生成正则脚本、预览、结构统计）、filter-ai.js（纯函数：AI 诊断提示词 + 结果校验）、filter-runtime.js（注册运行时正则）、filter-panel.js（弹窗 UI）
+tests/                 model / schema / ai / edit / diff / tokens / filter .test.mjs
 ```
 
 视图接口：`{ id, el, render(), onShow?(), invalidate?(), onSelectionChange?(), destroy?() }`。schema 视图是“全宽视图”（`isFullView`），隐藏侧栏和详情栏，无聊天时也能打开。
@@ -100,6 +101,17 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
 - **触屏 / 键盘**：`isTouch()`（`hover:none and pointer:coarse`）。触屏上不显示任何按键提示，不靠 Enter / Esc：编辑框始终有「取消 / 保存」按钮，AI 输入框 Enter 只换行（点发送按钮），搜索框用 × 代替 Esc。触屏上详情栏的字段**单击**即可编辑（双击在手机上不可靠）；表格行单击仍是打开详情，表头上方有一行提示。
 - 快捷键显示用 `kbd('Mod', 'K')` / 文案里写 `{mod}` 配 `withMod()`：Mac 显示 ⌘，其他系统显示 Ctrl。
 - **未在真实 Luker + 真实模型上测过**，只在 preview 的 `createMockAiAccess` 上测过。
+
+## 标签过滤
+
+- 入口：记忆结构页顶栏「标签过滤」按钮（用户选的位置，没有单独设置页），开启时显示「标签过滤 · 开」。弹窗里：启用开关、方案（新建 / 改名 / 删除 / 切换）、黑名单 + 白名单输入框（各一排常用标签，点一下加入）、AI 诊断、过滤前后对比预览（可选最近 8 条 AI 回复）。改动在弹窗里，点保存才写入。
+- 设置存 `extensionSettings.memory_lens.tagFilter = { enabled, active, presets:[{id,name,black,white}] }`，保存后在 window 上发 `memory-lens:tagfilter`。
+- 生效方式：`index.js` 启动时 `startTagFilter()`，按 URL 导入 `/scripts/extensions/regex/engine.js` 的 `registerManagedRegexProvider('memory-lens-tag-filter')`，`setScripts(buildScripts(plan))`。脚本 `pluginOnly + promptOnly`、`placement:[AI_OUTPUT]`（用户确认**只过滤 AI 回复**），只在插件读楼层通道（`lib/plugin-floors.js` `cookPluginFloorText`，`isPluginInput`）运行；不写进用户正则列表，不影响聊天显示和主生成。**编排 / 预设助手 / 角色编辑助手读楼层也走这条通道，会一起被过滤**（界面写明了）。
+- 标签写法：尖括号写名字（think）、方括号带括号（[时间]）、注释写 `!--`；分隔符 `, ，、 ; 空格`。
+- 脚本顺序：先黑名单（整块；缺开头的块删到闭合标签为止；没结尾的块删到末尾；方括号成对块和单行标记；注释），再白名单（一条正则：命中块留内部文字，其他逐段删掉；没闭合的白名单块也算到末尾），最后整理空行。预览用同一套脚本（`applyScripts`），所见即所得（宏替换除外）。
+- 白名单 + 裸文本正文 = 正文全删：输入框下有固定提示；预览样本被删光 / 只剩 <5% 时显示琥珀色警告。AI 诊断：`source.ai.diagnoseFilter(sample)` 用「工具」那组模型（AI 设置），单个 `submit_filter` 工具；提示词是自己写的中文（filter-ai.js），附上程序统计的标签结构和裸文本字数；回复太长时取头尾各 2500 字。`readDiagnosis` 强制规则：body=bare 时清空白名单；白名单会把样本删光时也清空。结果只填进输入框，用户确认后再保存。
+- 不照搬柚月记忆：代码、样式、文案、提示词都是自己写的；只参考了功能形态（参考图在用户聊天里）。
+- **未在真实 Luker 中测过**：需要确认运行时脚本确实在记忆图提取时生效（可在 Luker 正则调试的运行时脚本里看到「记忆透镜 · 标签过滤 · …」）。
 
 ## Token 计数器
 
