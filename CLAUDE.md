@@ -1,7 +1,7 @@
 # CLAUDE.md — Memory Lens（记忆透镜）
 
 Luker（SillyTavern 分支，AGPL-3.0）第三方扩展：给内置 `memory-graph` 扩展做的可视化工作台。
-仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.5.0。
+仓库 https://github.com/xzhouzhou758/memory-lens ，用户在 Luker「扩展 → 安装扩展」粘贴该地址安装。当前版本 0.6.0。
 
 ## 用户的硬性要求（必须遵守）
 
@@ -100,6 +100,13 @@ tests/                 model.test.mjs、schema.test.mjs、ai.test.mjs、edit.tes
 - **触屏 / 键盘**：`isTouch()`（`hover:none and pointer:coarse`）。触屏上不显示任何按键提示，不靠 Enter / Esc：编辑框始终有「取消 / 保存」按钮，AI 输入框 Enter 只换行（点发送按钮），搜索框用 × 代替 Esc。触屏上详情栏的字段**单击**即可编辑（双击在手机上不可靠）；表格行单击仍是打开详情，表头上方有一行提示。
 - 快捷键显示用 `kbd('Mod', 'K')` / 文案里写 `{mod}` 配 `withMod()`：Mac 显示 ⌘，其他系统显示 Ctrl。
 - **未在真实 Luker + 真实模型上测过**，只在 preview 的 `createMockAiAccess` 上测过。
+
+## Token 计数器
+
+- `src/token-stats.js`：`index.js` 启动时就开记录器（透镜没打开也在记）。监听 GENERATION_ENDED / STOPPED，延迟 300ms 读 `getLastRecallProjection()`，用 `ctx.getTokenCountAsync` 分别算 corePacket（常驻）和 focusPacket（召回）。
+- 记录存在 `chatMetadata.memory_lens_tokens.entries`（跟着聊天走，最多 500 条）；按 `at` 去重，同一楼层（最后一条用户消息的下标）重新生成会覆盖而不是新增。记录完在 window 上发 `memory-lens:tokens` 事件，source.subscribe 收到后刷新。
+- 入口在左栏「AI 当前记忆」卡片里的「注入 token」一行（顶栏放不下，已试过）。弹窗：本次合计 / 召回 / 常驻，历史合计 / 平均 / 最多，最近 20 次堆叠柱状图（琥珀 = 召回，蓝 = 常驻），可清空（带撤销）。
+- 不统计召回过程本身的 LLM 请求（memory-graph 没暴露）。
 
 ## 双击修改记忆内容
 

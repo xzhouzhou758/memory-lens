@@ -81,4 +81,9 @@ if (!addMenuItem()) {
     setTimeout(() => observer.disconnect(), 120000);
 }
 
+// Token counter: records every generation's injection, even with the lens closed.
+import('./src/token-stats.js')
+    .then(({ startRecorder }) => startRecorder(() => globalThis.Luker?.getContext?.() || globalThis.SillyTavern?.getContext?.()))
+    .catch(err => console.warn('[memory-lens] token recorder unavailable', err));
+
 globalThis.MemoryLens = Object.freeze({ open, close });

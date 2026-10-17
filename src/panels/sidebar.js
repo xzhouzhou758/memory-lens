@@ -6,6 +6,7 @@ import { h, clear, formatTime, put } from '../util.js';
 import { icon } from '../icons.js';
 import { t, typeLabel, relationLabel } from '../i18n.js';
 import { isDefaultFilters, typeVisual, relationCategory } from '../model.js';
+import { formatTokens } from '../token-stats.js';
 import { segmented, switchControl, typeDot, sectionTitle, button } from '../ui/components.js';
 
 export function createSidebar(app) {
@@ -31,7 +32,10 @@ export function createSidebar(app) {
                 h('button', { type: 'button', class: 'ml-ctxrow', dataset: { ctx: 'recalled' }, onClick: () => app.setFilter({ onlyContext: !onlyContext }) },
                     h('span', { class: 'ml-ctxrow-dot', 'aria-hidden': 'true' }), h('span', { text: t('recalled') }), h('b', { text: String(recalledCount) })),
                 h('button', { type: 'button', class: 'ml-ctxrow', dataset: { ctx: 'pinned' }, onClick: () => app.setFilter({ onlyContext: !onlyContext }) },
-                    h('span', { class: 'ml-ctxrow-dot', 'aria-hidden': 'true' }), h('span', { text: t('pinned') }), h('b', { text: String(pinnedCount) }))),
+                    h('span', { class: 'ml-ctxrow-dot', 'aria-hidden': 'true' }), h('span', { text: t('pinned') }), h('b', { text: String(pinnedCount) })),
+                model.tokens ? h('button', { type: 'button', class: 'ml-ctxrow', dataset: { ctx: 'tokens' }, title: t('tokTitle'), onClick: () => app.showTokens() },
+                    icon('gauge', { size: 13 }), h('span', { text: t('tokTitle') }),
+                    h('b', { text: model.tokens.current ? formatTokens(model.tokens.current.core + model.tokens.current.focus) : '—' })) : null),
             h('div', { class: 'ml-ctxcard-actions' },
                 switchControl(t('onlyInContext'), onlyContext, (value) => app.setFilter({ onlyContext: value })),
                 model.lastRecall ? button(t('viewInjection'), () => app.showInjection(), { iconName: 'doc', className: 'ml-btn-ghost ml-btn-sm' }) : null));

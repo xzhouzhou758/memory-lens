@@ -148,6 +148,15 @@ export function createMockSnapshot() {
             recallSelectedIds: ['e13', 'e14', 'e16', 'c_lin', 'c_shen', 'l_tower'],
             visibleIds: [],
         },
+        tokens: {
+            current: { at: Date.now() - 1000 * 60 * 3, core: 412, focus: 868 },
+            entries: Array.from({ length: 26 }, (_, i) => ({
+                at: Date.now() - (26 - i) * 1000 * 60 * 9,
+                floor: 40 + i * 2,
+                core: 300 + Math.round(i * 4.5),
+                focus: [620, 810, 0, 940, 700, 1120, 560, 880, 760, 990, 1300, 640, 720, 870, 1010, 450, 930, 1180, 690, 760, 840, 1240, 980, 610, 1090, 868][i],
+            })),
+        },
         lastRecall: {
             at: Date.now() - 1000 * 60 * 3,
             blocks: {

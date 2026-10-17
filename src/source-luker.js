@@ -10,6 +10,7 @@
 // duplicate state. If the import path ever moves, `load()` reports a clear
 // error instead of crashing the UI.
 
+import { countTokens, readEntries, clearEntries, TOKENS_EVENT, META_KEY as TOKENS_META_KEY } from './token-stats.js';
 import { buildTaskMessages as aiTaskMessages, rewriteSystemPrompt, rewriteUserPrompt, suggestSystemPrompt, suggestUserPrompt } from './ai/ai-model.js';
 
 const MG_BASE = '/scripts/extensions/memory-graph';
@@ -62,6 +63,7 @@ function chatLabelOf(ctx) {
 
 export function createLukerSource() {
     let api = null;
+    let tokenCache = { at: 0, core: 0, focus: 0 };
 
     const resolveApi = () => {
         const ctx = getContext();
@@ -107,6 +109,15 @@ export function createLukerSource() {
             try { injection = mg.getCurrentInjection?.(ctx) || read.getInjectionState?.(); } catch { injection = null; }
             let lastRecall = null;
             try { lastRecall = await mg.getLastRecallProjection?.(ctx); } catch { lastRecall = null; }
+            let tokens = null;
+            try {
+                const at = Number(lastRecall?.at || 0);
+                if (at && tokenCache.at !== at) {
+                    const [core, focus] = await Promise.all([countTokens(ctx, lastRecall.blocks?.corePacket), countTokens(ctx, lastRecall.blocks?.focusPacket)]);
+                    tokenCache = { at, core, focus };
+                }
+                tokens = { current: at ? { ...tokenCache } : null, entries: structuredClone(readEntries(ctx)) };
+            } catch { tokens = null; }
             return {
                 chatKey: String(chatId),
                 chatLabel: chatLabelOf(ctx),
@@ -117,7 +128,23 @@ export function createLukerSource() {
                 columnLabels,
                 injection,
                 lastRecall,
+                tokens,
             };
+        },
+
+        /** Clears this chat's token log; returns the old entries for undo. */
+        clearTokens() {
+            const ctx = getContext();
+            const previous = structuredClone(readEntries(ctx));
+            clearEntries(ctx);
+            return previous;
+        },
+
+        restoreTokens(entries) {
+            const ctx = getContext();
+            if (!ctx.chatMetadata) return;
+            ctx.chatMetadata[TOKENS_META_KEY] = { v: 1, entries: structuredClone(entries || []) };
+            ctx.saveMetadataDebounced?.();
         },
 
         /**
@@ -143,6 +170,9 @@ export function createLukerSource() {
                         offs.push(() => events.removeListener?.(type, handler));
                     }
                 };
+                const onTokens = () => onChange('tokens');
+                globalThis.addEventListener?.(TOKENS_EVENT, onTokens);
+                offs.push(() => globalThis.removeEventListener?.(TOKENS_EVENT, onTokens));
                 bind(CHAT_EVENTS, 'chat');
                 bind(MESSAGE_EVENTS, 'message');
             } catch {

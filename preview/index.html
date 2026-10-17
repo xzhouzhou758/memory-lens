@@ -41,6 +41,7 @@
             ai: scenario === 'demo' || scenario === 'empty' ? createMockAiAccess() : null,
             edit: scenario === 'demo' ? editAccess : null,
             openNative() { return false; },
+            clearTokens() { return []; },
         };
         window.__lens = mountMemoryLens({
             source,

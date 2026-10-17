@@ -16,11 +16,18 @@ export function createDialog() {
     const el = h('div', { class: 'ml-dialog-backdrop', hidden: true, onMousedown: (event) => { if (event.target === el) close(); } }, panel);
     let returnFocus = null;
 
+    /** sections: [{ title, text }] or a ready DOM node. */
     function open(heading, sections) {
         returnFocus = document.activeElement;
         title.textContent = heading;
         panel.setAttribute('aria-label', heading);
         clear(body);
+        if (sections instanceof Node) {
+            put(body, sections);
+            el.hidden = false;
+            requestAnimationFrame(() => closeBtn.focus());
+            return;
+        }
         for (const section of sections) {
             const text = String(section.text || '').trim();
             put(body, h('section', { class: 'ml-dialog-section' },

@@ -89,3 +89,27 @@
 .mlens .ml-inline-actions { display: inline-flex; gap: 4px; margin-left: auto; }
 .mlens .ml-inline-actions .ml-btn-sm { height: 24px; padding: 0 8px; font-size: 12px; }
 .mlens.is-compact .ml-inline-actions .ml-btn-sm { height: 34px; padding: 0 14px; font-size: 13px; }
+
+/* ---- Token counter ---- */
+.mlens .ml-tok { display: flex; flex-direction: column; gap: 12px; }
+.mlens .ml-tok-when { font-size: 12px; color: var(--ml-text-faint); }
+.mlens .ml-tok-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; border: 1px solid var(--ml-border); border-radius: var(--ml-radius); overflow: hidden; background: var(--ml-border); }
+.mlens .ml-tok-cell { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; background: var(--ml-surface); min-width: 0; }
+.mlens .ml-tok-label { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ml-text-faint); }
+.mlens .ml-tok-num { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.mlens .ml-tok-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--ml-text-faint); }
+.mlens [data-tone="focus"] .ml-tok-dot { background: var(--ml-recalled); }
+.mlens [data-tone="core"] .ml-tok-dot { background: var(--ml-pinned); }
+.mlens .ml-tok-sub { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: -4px 2px 0; font-size: 12px; color: var(--ml-text-muted); }
+.mlens .ml-tok-chart { margin: 0; padding: 10px 12px 12px; border: 1px solid var(--ml-border); border-radius: var(--ml-radius); background: var(--ml-surface); }
+.mlens .ml-tok-chart-head { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; color: var(--ml-text-muted); }
+.mlens .ml-tok-legend { display: inline-flex; gap: 10px; }
+.mlens .ml-tok-legend > span { display: inline-flex; align-items: center; gap: 4px; }
+.mlens .ml-tok-bars { display: flex; align-items: flex-end; gap: 3px; height: 96px; }
+.mlens .ml-tok-bar { flex: 1 1 0; min-width: 3px; display: flex; flex-direction: column; border-radius: 3px 3px 1px 1px; overflow: hidden; }
+.mlens .ml-tok-bar-focus { background: var(--ml-recalled); min-height: 0; }
+.mlens .ml-tok-bar-core { background: var(--ml-pinned); min-height: 0; }
+.mlens .ml-tok-bar:hover { filter: brightness(1.12); }
+.mlens .ml-tok-empty, .mlens .ml-tok-note { font-size: 12px; color: var(--ml-text-faint); line-height: 1.6; }
+.mlens .ml-tok-clear { align-self: flex-start; margin-left: -6px; }
+.mlens.is-compact .ml-tok-num { font-size: 17px; }

@@ -15,6 +15,7 @@ import { createTableView } from './views/table-view.js';
 import { createSidebar } from './panels/sidebar.js';
 import { createInspector } from './panels/inspector.js';
 import { createPalette } from './panels/palette.js';
+import { tokenPanel } from './panels/token-panel.js';
 import { createDialog } from './panels/dialog.js';
 import { iconButton, segmented, emptyState, button, kbd, isTouch } from './ui/components.js';
 import { createSchemaView } from './schema/schema-view.js';
@@ -128,6 +129,19 @@ export function mountMemoryLens({ source, container = document.body, onClose = n
                 showToast(t('editFailed', String(err?.message || err)), { error: true });
             }
             scheduleReload();
+        },
+        showTokens() {
+            const clearLog = source.clearTokens ? () => {
+                const previous = source.clearTokens();
+                dialog.close();
+                showToast(t('tokCleared'), {
+                    action: t('schemaUndo'),
+                    onAction: () => { source.restoreTokens?.(previous); scheduleReload(); },
+                    duration: EDIT_UNDO_MS,
+                });
+                scheduleReload();
+            } : null;
+            dialog.open(t('tokTitle'), tokenPanel(model, { onClear: clearLog }));
         },
         showInjection() {
             const recall = model?.lastRecall;

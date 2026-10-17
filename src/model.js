@@ -371,6 +371,7 @@ export function buildModel(snapshot = {}) {
         schemaColumns,
         schemaHints,
         lastRecall: snapshot.lastRecall || null,
+        tokens: snapshot.tokens || null,
         maxFloor,
     };
 }

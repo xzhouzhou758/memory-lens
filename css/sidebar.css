@@ -36,6 +36,8 @@
 .mlens .ml-ctxrow-dot { width: 8px; height: 8px; border-radius: 50%; }
 .mlens .ml-ctxrow[data-ctx="recalled"] .ml-ctxrow-dot { background: var(--ml-recalled); }
 .mlens .ml-ctxrow[data-ctx="pinned"] .ml-ctxrow-dot { background: var(--ml-pinned); }
+.mlens .ml-ctxrow[data-ctx="tokens"] { border-top: 1px dashed var(--ml-border); margin-top: 2px; padding-top: 7px; }
+.mlens .ml-ctxrow[data-ctx="tokens"] > svg { margin: 0 -2px; color: var(--ml-text-faint); }
 .mlens .ml-ctxcard-actions { display: grid; gap: 4px; border-top: 1px solid var(--ml-border); padding-top: 6px; }
 .mlens .ml-ctxcard-actions .ml-btn { justify-self: start; margin-left: -6px; }
 
