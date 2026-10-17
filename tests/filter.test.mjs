@@ -78,7 +78,7 @@ test('inspectText tells wrapped replies from bare ones', () => {
 });
 
 import { readDiagnosis, diagnoseUserPrompt } from '../src/filter/filter-ai.js';
-import { readFilterSettings, activePlan } from '../src/filter/filter-runtime.js';
+import { readFilterSettings, activePlan, isPromptRule, collapse, depthOf, previewFloor } from '../src/filter/filter-runtime.js';
 
 test('AI diagnosis: bare body never gets a whitelist', () => {
     const bare = '<think>想</think>\n雨停了，林栖推门出去。';
@@ -99,5 +99,33 @@ test('filter settings default and active plan', () => {
     assert.equal(s.enabled, false);
     assert.equal(s.presets.length, 1);
     const ctx = { extensionSettings: { memory_lens: { tagFilter: { enabled: true, active: 'b', presets: [{ id: 'a', black: 'x' }, { id: 'b', black: 'think', white: 'content' }] } } } };
-    assert.deepEqual(activePlan(readFilterSettings(ctx)), { enabled: true, black: 'think', white: 'content' });
+    assert.deepEqual(activePlan(readFilterSettings(ctx)), { enabled: true, black: 'think', white: 'content', mirrorPrompt: true });
+});
+
+test('square markers stop at the next tag once newlines are collapsed', () => {
+    const flat = collapse('[时间] 第三天傍晚\n<content>\n雨停了。\n</content>');
+    assert.equal(flat, '[时间] 第三天傍晚 <content> 雨停了。 </content>');
+    assert.equal(filterText(flat, { black: '[时间]' }), '<content> 雨停了。 </content>');
+    assert.equal(filterText(flat, { white: '[时间], content' }), '[时间] 第三天傍晚 \n 雨停了。');
+});
+
+test('which of the user\'s rules get mirrored onto the memory-graph lane', () => {
+    const base = { promptOnly: true, placement: [2], findRegex: '/x/g', replaceString: '' };
+    assert.equal(isPromptRule(base), true);
+    assert.equal(isPromptRule({ ...base, findRegex: '/<think>[\\s\\S]*?<\\/think>/g', minDepth: 1 }), true, 'depth limits are kept');
+    assert.equal(isPromptRule({ ...base, findRegex: '/[\\s\\S]*/g', minDepth: 5 }), false, 'hides old floors');
+    assert.equal(isPromptRule({ ...base, pluginOnly: true }), false, 'already on the lane');
+    assert.equal(isPromptRule({ ...base, promptOnly: false }), false, 'edits the chat itself');
+    assert.equal(isPromptRule({ ...base, disabled: true }), false);
+    assert.equal(isPromptRule({ ...base, placement: [1] }), false, 'user input only');
+});
+
+test('preview falls back to local filtering without Luker', () => {
+    const chat = [{ is_user: true, mes: 'hi' }, { is_user: false, mes: '<think>a\nb</think>\n正文' }, { is_system: true, mes: 's' }];
+    assert.equal(depthOf(chat, 1), 0);
+    assert.equal(depthOf(chat, 0), 1);
+    const r = previewFloor({ chat }, 1, { black: 'think' });
+    assert.equal(r.real, false);
+    assert.equal(r.before, '<think>a b</think> 正文');
+    assert.equal(r.after, '正文');
 });

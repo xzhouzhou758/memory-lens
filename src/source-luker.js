@@ -10,7 +10,7 @@
 // duplicate state. If the import path ever moves, `load()` reports a clear
 // error instead of crashing the UI.
 
-import { readFilterSettings, writeFilterSettings } from './filter/filter-runtime.js';
+import { readFilterSettings, writeFilterSettings, previewFloor, filterStatus } from './filter/filter-runtime.js';
 import { SUBMIT_FILTER, diagnoseSystemPrompt, diagnoseUserPrompt, readDiagnosis } from './filter/filter-ai.js';
 import { countTokens, readEntries, clearEntries, TOKENS_EVENT, META_KEY as TOKENS_META_KEY } from './token-stats.js';
 import { buildTaskMessages as aiTaskMessages, rewriteSystemPrompt, rewriteUserPrompt, suggestSystemPrompt, suggestUserPrompt } from './ai/ai-model.js';
@@ -221,6 +221,9 @@ function createFilterAccess() {
             }
             return out;
         },
+        /** What memory-graph reads for that floor: before / after `plan`. */
+        preview: (floor, plan) => previewFloor(getContext(), floor, plan),
+        status: () => filterStatus(),
     };
 }
 

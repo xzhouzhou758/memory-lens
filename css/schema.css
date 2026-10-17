@@ -640,3 +640,5 @@
 .mlens.is-compact .ml-filter-lists, .mlens.is-compact .ml-filter-compare { grid-template-columns: 1fr; }
 .mlens.is-compact .ml-filter-text { max-height: 180px; }
 .mlens .ml-filter-input, .mlens .ml-filter-chip, .mlens .ml-filter-text { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+.mlens .ml-filter-toggle { display: flex; flex-direction: column; gap: 6px; }
+.mlens .ml-filter-status { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--ml-accent); }

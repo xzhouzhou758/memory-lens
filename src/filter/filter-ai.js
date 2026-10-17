@@ -72,7 +72,7 @@ export function diagnoseUserPrompt(sample) {
         tags,
         `所有标签块外面的文字：约 ${info.bareChars} 字（全文约 ${info.totalChars} 字）`,
         '',
-        '最近一条 AI 回复原文：',
+        '最近一条 AI 回复（这是记忆图实际读到的样子：换行已被压成空格，用户自己的正则已经先处理过）：',
         '<reply>',
         clipSample(sample),
         '</reply>',

@@ -456,5 +456,6 @@ export function createMockFilterAccess() {
         read: () => structuredClone(settings),
         write: (next) => { settings = structuredClone(next); },
         recentReplies: () => structuredClone(replies),
+        status: () => ({ registered: true, active: settings.enabled ? 4 : 0, mirrored: settings.enabled && settings.mirrorPrompt !== false ? ['去除思维链（示例预设）'] : [], userRules: [] }),
     };
 }

@@ -4,12 +4,25 @@
 // Started from index.js (works while the lens is closed). Scripts are
 // runtime-only: never written to the user's regex list, and scoped
 // pluginOnly + promptOnly so they only touch text plugins read.
+//
+// Also reproduces what memory-graph really reads for one floor, so the
+// preview / AI 诊断 see the same text: whitespace collapsed (memory-graph's
+// normalizeText), then the plugin lane with the user's own regex rules,
+// then ours (runtime scripts always run last).
 
-import { buildScripts } from './tag-filter.js';
+import { buildScripts, applyScripts, compileFind, AI_OUTPUT } from './tag-filter.js';
 
 const OWNER = 'memory-lens-tag-filter';
 const SETTINGS_KEY = 'memory_lens';
 export const FILTER_CHANGED_EVENT = 'memory-lens:tagfilter';
+
+let engine = null;
+let registration = null;
+let scripts = [];
+let mirror = true;
+let override = null; // preview: scripts to serve instead of the saved ones
+
+const MIRROR_PREFIX = 'memory-lens-tagfilter-mirror-';
 
 /** Settings shape: { enabled, active, presets: [{ id, name, black, white }] } */
 export function readFilterSettings(ctx) {
@@ -18,12 +31,14 @@ export function readFilterSettings(ctx) {
     const presets = Array.isArray(raw?.presets) ? raw.presets.filter(p => p && p.id) : [];
     if (!presets.length) presets.push({ id: 'default', name: '默认', black: '', white: '' });
     const active = presets.some(p => p.id === raw?.active) ? raw.active : presets[0].id;
-    return { enabled: Boolean(raw?.enabled), active, presets };
+    // mirrorPrompt: also run the user's 「仅提示词」 rules (e.g. a preset's
+    // thinking remover) where memory-graph reads. On unless turned off.
+    return { enabled: Boolean(raw?.enabled), active, presets, mirrorPrompt: raw?.mirrorPrompt !== false };
 }
 
 export function activePlan(settings) {
     const preset = settings.presets.find(p => p.id === settings.active) || settings.presets[0];
-    return { enabled: settings.enabled, black: preset?.black || '', white: preset?.white || '' };
+    return { enabled: settings.enabled, black: preset?.black || '', white: preset?.white || '', mirrorPrompt: settings.mirrorPrompt !== false };
 }
 
 export function writeFilterSettings(ctx, settings) {
@@ -35,17 +50,133 @@ export function writeFilterSettings(ctx, settings) {
 }
 
 export async function startTagFilter(getCtx) {
-    const engine = await import('/scripts/extensions/regex/engine.js');
-    if (typeof engine.registerManagedRegexProvider !== 'function') throw new Error('regex engine has no runtime providers');
-    const provider = engine.registerManagedRegexProvider(OWNER);
-    if (!provider) throw new Error('could not register regex provider');
+    engine = await import('/scripts/extensions/regex/engine.js');
+    if (typeof engine.registerRegexProvider !== 'function') throw new Error('regex engine has no runtime providers');
+    // Callback provider: evaluated on every regex pass, so mirrored rules
+    // follow the user's preset / character switches, and the preview can
+    // swap in unsaved scripts without firing change events.
+    registration = engine.registerRegexProvider(OWNER, () => {
+        if (override) return override.map(s => ({ ...s }));
+        const plan = activePlan(readFilterSettings(getCtx()));
+        return [...(plan.enabled && mirror ? mirroredRules() : []), ...scripts.map(s => ({ ...s }))];
+    });
+    if (!registration) throw new Error('could not register regex provider');
     const sync = () => {
-        try { provider.setScripts(buildScripts(activePlan(readFilterSettings(getCtx())))); } catch (err) { console.warn('[memory-lens] tag filter sync failed', err); }
+        try {
+            const plan = activePlan(readFilterSettings(getCtx()));
+            scripts = buildScripts(plan);
+            mirror = plan.mirrorPrompt;
+        } catch (err) { scripts = []; console.warn('[memory-lens] tag filter sync failed', err); }
+        registration.refresh?.();
     };
     sync();
     globalThis.addEventListener?.(FILTER_CHANGED_EVENT, sync);
     return () => {
         globalThis.removeEventListener?.(FILTER_CHANGED_EVENT, sync);
-        provider.unregister();
+        registration?.unregister();
+        registration = null;
     };
+}
+
+/**
+ * The user's 「仅提示词」 rules on AI replies (global / preset / character,
+ * only the ones Luker currently allows), copied onto the plugin lane.
+ * Depth limits are kept (memory-graph reads with each floor's real depth).
+ * Skipped: rules that wipe the whole text (they hide old floors to save
+ * context; mirrored they would blank memory-graph's view of older turns),
+ * plugin / display-only rules, disabled rules.
+ */
+export function mirroredRules() {
+    if (!engine?.getScriptsByType || !engine.SCRIPT_TYPES) return [];
+    const out = [];
+    for (const type of Object.values(engine.SCRIPT_TYPES)) {
+        let list = [];
+        // getScriptsByType never calls runtime providers (no recursion).
+        try { list = engine.getScriptsByType(type, { allowedOnly: true }) || []; } catch { list = []; }
+        for (const s of list) {
+            if (!isPromptRule(s)) continue;
+            out.push({ ...s, id: `${MIRROR_PREFIX}${s.id || out.length}`, scriptName: `记忆透镜 · 沿用 · ${String(s.scriptName || '').trim() || '未命名'}`, placement: [AI_OUTPUT], pluginOnly: true, promptOnly: true });
+        }
+    }
+    return out;
+}
+
+export function isPromptRule(s) {
+    if (!s || s.disabled || !s.promptOnly || s.pluginOnly || s.markdownOnly) return false;
+    if (!Array.isArray(s.placement) || !s.placement.includes(AI_OUTPUT)) return false;
+    return !isWipeRule(s);
+}
+
+const PROBE = '雨停了。\nShe opened the door 123.';
+/** A rule that turns plain text into nothing (e.g. /[\s\S]*\/ → ''). */
+export function isWipeRule(s) {
+    const re = compileFind(s?.findRegex);
+    if (!re) return false;
+    try { return !PROBE.replace(re, String(s.replaceString ?? '')).trim(); } catch { return false; }
+}
+
+const isOurs = (s) => String(s?.id || '').startsWith('memory-lens-tagfilter') || s?.__runtime_owner === OWNER;
+const onPluginLane = (s) => s && !s.disabled && s.pluginOnly && s.promptOnly && Array.isArray(s.placement) && s.placement.includes(AI_OUTPUT);
+
+/**
+ * Is the filter really registered, and which of the user's own rules also
+ * run where memory-graph reads?
+ */
+export function filterStatus() {
+    if (!engine || !registration) return { registered: false, active: 0, mirrored: [], userRules: [] };
+    let all = [];
+    try { all = engine.getRegexScripts({ allowedOnly: true }) || []; } catch { all = []; }
+    return {
+        registered: true,
+        active: all.filter(s => isOurs(s) && !s.disabled && !String(s.id).startsWith(MIRROR_PREFIX)).length,
+        mirrored: all.filter(s => String(s.id || '').startsWith(MIRROR_PREFIX)).map(s => String(s.scriptName || '').replace(/^记忆透镜 · 沿用 · /, '')),
+        userRules: all.filter(s => !isOurs(s) && onPluginLane(s)).map(s => String(s.scriptName || '').trim()).filter(Boolean),
+    };
+}
+
+/** memory-graph's normalizeText. */
+export const collapse = (text) => String(text || '').replace(/\s+/g, ' ').trim();
+
+/** Depth from the chat end, skipping system rows (Luker's computeDepthsFromEnd). */
+export function depthOf(chat, index) {
+    let cursor = 0;
+    for (let i = chat.length - 1; i >= 0; i--) {
+        if (!chat[i] || chat[i].is_system) continue;
+        if (i === index) return cursor;
+        cursor++;
+    }
+    return undefined;
+}
+
+/**
+ * What memory-graph reads for one AI reply, before and after `plan`,
+ * run through Luker's real regex engine.
+ *   before: whitespace collapsed + the user's own 「仅插件」 rules
+ *   after:  the same + mirrored 「仅提示词」 rules (if on) + the tag filter
+ * @returns {{ before: string, after: string, real: boolean }}
+ *   real: false when the engine was not reachable (local fallback).
+ */
+export function previewFloor(ctx, index, plan) {
+    const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
+    const text = collapse(chat[index]?.mes);
+    const apply = ctx?.regex?.applyRegex;
+    const planScripts = buildScripts({ ...plan, enabled: true });
+    if (typeof apply !== 'function' || !registration || !text) {
+        return { before: text, after: planScripts.length ? applyScripts(text, planScripts) : text, real: false };
+    }
+    const run = (served) => {
+        override = served;
+        try {
+            return apply(text, ctx.regex.placement?.AI_OUTPUT ?? AI_OUTPUT, { isPluginInput: true, depth: depthOf(chat, index) });
+        } finally {
+            override = null;
+        }
+    };
+    try {
+        const before = run([]);
+        const after = run([...(plan.mirrorPrompt !== false ? mirroredRules() : []), ...planScripts]);
+        return { before, after, real: true };
+    } catch {
+        return { before: text, after: planScripts.length ? applyScripts(text, planScripts) : text, real: false };
+    }
 }

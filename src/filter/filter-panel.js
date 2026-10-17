@@ -6,7 +6,7 @@
 
 import { h, clear, put } from '../util.js';
 import { t } from '../i18n.js';
-import { button, switchControl } from '../ui/components.js';
+import { button, switchControl, checkRow } from '../ui/components.js';
 import { COMMON_BLACK, COMMON_WHITE, addToList, filterText, invalidTokens, planWarnings, parseTagList } from './tag-filter.js';
 
 let presetCounter = 0;
@@ -20,6 +20,19 @@ export function openFilterDialog({ access, aiAccess, confirmModal, showToast }) 
     try { state = structuredClone(access.read()); } catch (err) { showToast(t('filterFailed', String(err?.message || err))); return; }
     const replies = (() => { try { return access.recentReplies?.(8) || []; } catch { return []; } })();
     let sampleIndex = 0;
+    const count = (text) => String(text ?? '').replace(/\s+/g, '').length;
+    // Text memory-graph really reads (whitespace collapsed + the user's own
+    // plugin-lane regex); falls back to the raw reply in the preview build.
+    const readFor = (i, plan) => {
+        const reply = replies[i];
+        if (!reply) return null;
+        if (access.preview) {
+            try { return access.preview(reply.floor, plan); } catch { /* fall back */ }
+        }
+        return { before: reply.text, after: filterText(reply.text, plan), real: false };
+    };
+    const planNow = () => ({ ...current(), mirrorPrompt: state.mirrorPrompt !== false });
+    const lensText = (i) => readFor(i, { black: '', white: '' })?.before || '';
     let diagnosis = null;
     let busy = false;
     const current = () => state.presets.find(p => p.id === state.active) || state.presets[0];
@@ -113,8 +126,9 @@ export function openFilterDialog({ access, aiAccess, confirmModal, showToast }) 
             hint.hidden = !bad.length;
             hint.textContent = bad.length ? t('filterBadTags', bad.join('、')) : '';
         }
-        const sample = replies[sampleIndex]?.text || '';
-        const warn = planWarnings(current(), sample);
+        const r = readFor(sampleIndex, planNow());
+        const warn = r && parseTagList(current().white).length && count(r.before) && !count(r.after) ? ['empty']
+            : planWarnings(current(), lensText(sampleIndex));
         whiteWarn.hidden = !warn.length;
         whiteWarn.textContent = warn.includes('empty') ? t('filterWarnEmpty') : warn.includes('tiny') ? t('filterWarnTiny') : '';
     }
@@ -123,7 +137,7 @@ export function openFilterDialog({ access, aiAccess, confirmModal, showToast }) 
     function paintAi() {
         clear(aiBox);
         if (!aiAccess?.diagnoseFilter) return;
-        const sample = replies[0]?.text || '';
+        const sample = lensText(0);
         const btn = button(busy ? t('filterDiagnosing') : t('filterDiagnose'), async () => {
             if (busy || !sample) return;
             busy = true;
@@ -155,7 +169,6 @@ export function openFilterDialog({ access, aiAccess, confirmModal, showToast }) 
     }
 
     // ----- Preview ---------------------------------------------------------
-    const count = (text) => String(text).replace(/\s+/g, '').length;
     function paintPreview() {
         clear(previewBox);
         put(previewBox, h('div', { class: 'ml-filter-label' },
@@ -166,17 +179,17 @@ export function openFilterDialog({ access, aiAccess, confirmModal, showToast }) 
                 select.value = String(sampleIndex);
                 return select;
             })() : null));
-        const sample = replies[sampleIndex]?.text;
-        if (!sample) {
+        const result = readFor(sampleIndex, planNow());
+        if (!result?.before && !replies[sampleIndex]) {
             put(previewBox, h('p', { class: 'ml-filter-tip', text: t('filterNoReply') }));
             return;
         }
-        const plan = current();
-        const active = parseTagList(plan.black).length || parseTagList(plan.white).length;
-        const after = active ? filterText(sample, plan) : sample;
-        put(previewBox, h('div', { class: 'ml-filter-compare' },
-            pane(t('filterBefore'), sample, count(sample)),
-            pane(t('filterAfter'), after, count(after), !count(after))));
+        const { before, after } = result;
+        put(previewBox,
+            h('p', { class: 'ml-filter-tip', text: result.real ? t('filterPreviewReal') : t('filterPreviewRaw') }),
+            h('div', { class: 'ml-filter-compare' },
+                pane(t('filterBefore'), before, count(before), !count(before)),
+                pane(t('filterAfter'), after, count(after), !count(after))));
     }
     const pane = (title, text, n, empty = false) => h('div', { class: `ml-filter-pane ${empty ? 'is-empty' : ''}`.trim() },
         h('div', { class: 'ml-filter-pane-head' }, h('span', { text: title }), h('span', { class: 'ml-filter-count', text: t('filterChars', n) })),
@@ -193,7 +206,26 @@ export function openFilterDialog({ access, aiAccess, confirmModal, showToast }) 
     }
 
     const toggle = h('div', { class: 'ml-filter-toggle' });
-    const paintToggle = () => put(clear(toggle), switchControl(t('filterEnable'), state.enabled, (v) => { state.enabled = v; paintToggle(); }));
+    const statusLine = () => {
+        let st = null;
+        try { st = access.status?.() || null; } catch { st = null; }
+        if (!st) return null;
+        if (!st.registered) return h('p', { class: 'ml-filter-bad', text: t('filterNotRegistered') });
+        const names = (list) => list.slice(0, 4).join('、') + (list.length > 4 ? ' 等' : '');
+        return h('div', { class: 'ml-filter-status' },
+            h('p', { class: st.active || st.mirrored.length ? '' : 'ml-filter-tip', text: st.active || st.mirrored.length ? t('filterRunning', st.active + st.mirrored.length) : t('filterIdle') }),
+            st.mirrored.length ? h('p', { class: 'ml-filter-tip', text: t('filterMirrored', st.mirrored.length, names(st.mirrored)) }) : null,
+            st.userRules.length ? h('p', { class: 'ml-filter-tip', text: t('filterUserRules', st.userRules.length, names(st.userRules)) }) : null);
+    };
+    const paintToggle = () => put(clear(toggle),
+        switchControl(t('filterEnable'), state.enabled, (v) => { state.enabled = v; paintToggle(); }),
+        checkRow({
+            checked: state.mirrorPrompt !== false,
+            label: t('filterMirror'),
+            note: t('filterMirrorNote'),
+            onChange: (v) => { state.mirrorPrompt = v; paintHints(); paintPreview(); },
+        }),
+        statusLine());
     paintToggle();
 
     put(listsBox, listBlock('black'), listBlock('white'));

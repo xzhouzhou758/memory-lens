@@ -109,7 +109,8 @@ export function buildScripts(plan) {
     }
     if (bSquare) {
         out.push(script(++n, '删除方括号块', `/\\[(${bSquare})\\][\\s\\S]*?\\[\\/\\1\\]/gi`, ''));
-        out.push(script(++n, '删除方括号行', `/\\[(?:${bSquare})\\][^\\n]*/gi`, ''));
+        // memory-graph collapses newlines first, so a marker stops at the next tag too.
+        out.push(script(++n, '删除方括号行', `/\\[(?:${bSquare})\\][^\\n<\\[]*/gi`, ''));
     }
     if (black.some(t => t.kind === 'comment')) {
         out.push(script(++n, '删除注释', '/<!--[\\s\\S]*?(?:-->|$)/g', ''));
@@ -130,7 +131,7 @@ export function buildScripts(plan) {
                 groups += 1;
             } else if (tag.kind === 'square') {
                 alts.push(`\\[${name}\\]([\\s\\S]*?)\\[\\/${name}\\]`);
-                alts.push(`(\\[${name}\\][^\\n]*)`);
+                alts.push(`(\\[${name}\\][^\\n<\\[]*)`);
                 openers.push(`\\[${name}\\]`);
                 groups += 2;
             } else {
