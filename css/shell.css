@@ -22,7 +22,12 @@
 }
 .mlens.is-embedded { position: relative; inset: auto; z-index: auto; width: auto; height: 100%; animation: none; }
 
-.mlens *, .mlens *::before, .mlens *::after { box-sizing: border-box; }
+.mlens *, .mlens *::before, .mlens *::after { box-sizing: border-box; text-shadow: none; }
+/* Luker themes style bare elements (code, small, select options); reset them so light mode reads. */
+.mlens code, .mlens kbd, .mlens small, .mlens b, .mlens strong, .mlens em, .mlens q, .mlens a { color: inherit; opacity: 1; }
+.mlens code { border: 0; background: none; line-height: inherit; }
+.mlens select option { background: var(--ml-surface); color: var(--ml-text); }
+.mlens select { margin-bottom: 0; }
 .mlens [hidden] { display: none !important; }
 .mlens button { font: inherit; color: inherit; margin: 0; }
 .mlens h1, .mlens h2, .mlens h3, .mlens h4, .mlens p, .mlens ul, .mlens ol, .mlens dl, .mlens dd, .mlens figure, .mlens blockquote, .mlens pre { margin: 0; padding: 0; }

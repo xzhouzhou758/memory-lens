@@ -1,5 +1,9 @@
 /* Inspector */
-.mlens .ml-inspector-body { display: grid; gap: 18px; padding: 0 20px 32px; align-content: start; }
+.mlens .ml-inspector-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 0 20px 32px; align-content: start; }
+/* Long single-line rows (event links, field values) must not widen the column. */
+.mlens .ml-inspector-body > *, .mlens .ml-insp-block > *, .mlens .ml-insp-fields > *,
+.mlens .ml-insp-eventlist > *, .mlens .ml-insp-children > *, .mlens .ml-insp-relgroup > *, .mlens .ml-insp-rellist > * { min-width: 0; }
+.mlens .ml-inspector { overflow-x: hidden; }
 .mlens .ml-insp-head {
     position: sticky; top: 0; z-index: 1;
     display: grid; gap: 8px; margin: 0 -20px; padding: 14px 20px 14px;
@@ -42,7 +46,7 @@
 .mlens .ml-insp-children { display: grid; gap: 4px; flex-basis: 100%; }
 .mlens .ml-insp-children .ml-nodelink { width: 100%; }
 
-.mlens .ml-insp-fields { display: grid; grid-template-columns: minmax(72px, auto) 1fr; gap: 0; flex-basis: 100%; border: 1px solid var(--ml-border); border-radius: var(--ml-radius); overflow: hidden; }
+.mlens .ml-insp-fields { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: 0; flex-basis: 100%; min-width: 0; border: 1px solid var(--ml-border); border-radius: var(--ml-radius); overflow: hidden; }
 .mlens .ml-insp-fields dt, .mlens .ml-insp-fields dd { padding: 8px 12px; border-bottom: 1px solid var(--ml-border); }
 .mlens .ml-insp-fields dt { color: var(--ml-text-faint); font-size: 12px; background: var(--ml-surface-2); white-space: nowrap; }
 .mlens .ml-insp-fields dd { color: var(--ml-text); line-height: 1.6; word-break: break-word; white-space: pre-wrap; }
