@@ -328,6 +328,22 @@ const SCHEMA_READ_TOOL = {
         },
     },
 };
+// Luker's DEFAULT_SCHEMA_ITER_SYSTEM_PROMPT promises world_book_list /
+// lorebook_query / lorebook_list / lorebook_get. We only offer those tools
+// when iteration-library/tools/lorebook-reads.js actually loaded (see
+// round() below); strip the paragraph that names them otherwise, so the
+// model never calls a tool we didn't put in `catalog` — that call gets
+// rejected as unknown and burns a retry for nothing.
+function stripLorebookToolMentions(prompt) {
+    const start = prompt.indexOf('Reading the world (when scope is character):');
+    if (start < 0) return prompt;
+    const endMarker = 'do NOT copy lorebook text into schema fields. extractHint / columnHints describe extraction rules, not stored content.';
+    const endAt = prompt.indexOf(endMarker);
+    if (endAt < 0) return prompt;
+    const end = endAt + endMarker.length;
+    return `${prompt.slice(0, start)}${prompt.slice(end)}`.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 const LANGUAGE_NOTE = [
     '',
     '# Working mode',
@@ -347,11 +363,17 @@ function createAiAccess(resolveApi) {
                 import(`${ITER_BASE}/system-prompt.js`),
                 import(`${ITER_BASE}/read-fields-dispatcher.js`),
                 import('/scripts/iteration-library/runner.js'),
-            ]).then(([main, overrides, tools, prompt, readFields, runner]) => {
+                // Optional: lets the AI look up world-book names/entries while
+                // designing the schema, same as Luker's own schema studio. The
+                // base prompt (below) tells the model these tools exist, so if
+                // this module is ever missing on an older Luker, degrade to an
+                // empty catalog rather than failing the whole AI session.
+                import('/scripts/iteration-library/tools/lorebook-reads.js').catch(() => null),
+            ]).then(([main, overrides, tools, prompt, readFields, runner, lorebookReads]) => {
                 const needed = [main.getSettings, main.normalizeNodeTypeSchema, tools.buildToolCatalog, tools.normalizeToolCallToEdit,
                     readFields.dispatchMgSchemaReadFields, runner.requestToolCallsWithRetry];
                 if (needed.some(fn => typeof fn !== 'function')) throw new SourceError('ai-unsupported');
-                return { main, overrides, tools, prompt, readFields, runner };
+                return { main, overrides, tools, prompt, readFields, runner, lorebookReads };
             }).catch((err) => {
                 modules = null;
                 throw err instanceof SourceError ? err : new SourceError('ai-unsupported', String(err?.message || err));
@@ -546,13 +568,23 @@ function createAiAccess(resolveApi) {
          * memory-graph's sandbox and chain onto `live`.
          */
         async round({ messages, live, signal }) {
-            const { ctx } = resolveApi();
-            const { main, overrides, tools, prompt, readFields, runner } = await loadModules();
+            const { ctx, api: mg } = resolveApi();
+            const { main, overrides, tools, prompt, readFields, runner, lorebookReads } = await loadModules();
             const settings = main.getSettings();
             const effective = (typeof overrides.getEffectiveSettings === 'function' ? overrides.getEffectiveSettings(ctx, settings) : null) || settings;
-            const basePrompt = String(effective?.schemaIterSystemPrompt || '').trim() || prompt.DEFAULT_SCHEMA_ITER_SYSTEM_PROMPT || '';
+            let basePrompt = String(effective?.schemaIterSystemPrompt || '').trim() || prompt.DEFAULT_SCHEMA_ITER_SYSTEM_PROMPT || '';
             const control = new Set(Object.values(tools.CONTROL_TOOL_NAMES || {}));
-            const catalog = [...tools.buildToolCatalog().filter(def => !control.has(def?.function?.name)), SCHEMA_READ_TOOL];
+            // DEFAULT_SCHEMA_ITER_SYSTEM_PROMPT (above) tells the model it can
+            // call world_book_list / lorebook_query / lorebook_list / lorebook_get
+            // to ground the schema in the character's world info — same as
+            // Luker's own schema studio. Offer those tools when the shared
+            // module loaded; if it didn't, strip the paragraph that names them
+            // so the prompt never promises a tool we don't put in `catalog`.
+            const lorebookTools = lorebookReads?.LOREBOOK_READ_TOOL_DEFS || [];
+            if (!lorebookTools.length) basePrompt = stripLorebookToolMentions(basePrompt);
+            const info = typeof mg?.getSchemaScopeInfo === 'function' ? mg.getSchemaScopeInfo(ctx, settings) : null;
+            const avatarForReads = info?.hasAvatar ? String(info.avatar || '') : '';
+            const catalog = [...tools.buildToolCatalog().filter(def => !control.has(def?.function?.name)), SCHEMA_READ_TOOL, ...lorebookTools];
             const result = await runner.requestToolCallsWithRetry(ctx, runnerSettings(settings), {
                 taskMessages: aiTaskMessages(`${basePrompt}${LANGUAGE_NOTE}`, messages),
                 runtimeWorldInfo: null,
@@ -574,6 +606,10 @@ function createAiAccess(resolveApi) {
                 try {
                     if (name === SCHEMA_READ_TOOL.function.name) {
                         content = await readFields.dispatchMgSchemaReadFields({ liveSchema: current, args });
+                    } else if (lorebookReads?.isLorebookReadTool?.(name)) {
+                        const res = await lorebookReads.runLorebookReadTool({ id, name, args }, { context: ctx, avatar: avatarForReads });
+                        if (res?.ok === false) { ok = false; content = { error: res.error || 'lorebook read failed' }; }
+                        else content = res?.result ?? res;
                     } else {
                         const edits = await tools.normalizeToolCallToEdit(
                             { function: { name, arguments: JSON.stringify(args) } },
