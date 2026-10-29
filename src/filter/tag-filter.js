@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // 标签过滤 (pure, no DOM): turns a black / white tag list into Luker regex
-// scripts for the plugin input lane (pluginOnly + promptOnly), so only the
-// text plugins read (memory-graph extraction / recall …) is filtered.
+// scripts for the plugin request lane, so only the text going into plugin
+// requests (memory-graph extraction / recall …) is filtered. Plugin replies
+// and the main prompt are left alone.
 // The same scripts drive the preview, so what you see is what runs.
 //
 // Tag forms: angle `think` / `<think>`, square `[时间]`, HTML comment `!--`.
@@ -11,6 +12,15 @@
 
 export const SCRIPT_PREFIX = 'memory-lens-tagfilter';
 export const AI_OUTPUT = 2; // regex_placement.AI_OUTPUT
+
+/**
+ * Scope flags for the plugin request lane.
+ * Current Luker: `pluginLanes: ['request']` (the reply lane is separate).
+ * Older Luker (before pluginLanes): `pluginOnly + promptOnly`.
+ */
+export function requestLaneScope(modern = true) {
+    return modern ? { pluginLanes: ['request'], promptOnly: false } : { pluginOnly: true, promptOnly: true };
+}
 
 export const COMMON_BLACK = ['think', 'thinking', 'details', 'summary', '!--', 'Memory'];
 export const COMMON_WHITE = ['content', 'message', 'statusbar', 'globalTime', '[时间]'];
@@ -65,7 +75,7 @@ export function addToList(text, token) {
     return formatTagList([...tags, tag]);
 }
 
-const script = (n, scriptName, findRegex, replaceString) => ({
+const makeScript = (n, scriptName, findRegex, replaceString, scope) => ({
     id: `${SCRIPT_PREFIX}-${n}`,
     scriptName: `记忆透镜 · 标签过滤 · ${scriptName}`,
     findRegex,
@@ -74,8 +84,7 @@ const script = (n, scriptName, findRegex, replaceString) => ({
     placement: [AI_OUTPUT],
     disabled: false,
     markdownOnly: false,
-    promptOnly: true,
-    pluginOnly: true,
+    ...scope,
     runOnEdit: false,
     substituteRegex: 0,
     minDepth: null,
@@ -86,15 +95,18 @@ const angleOpen = (names) => `<(?:${names})(?=[\\s>/])`;
 
 /**
  * @param {{ enabled?: boolean, black?: string, white?: string }} plan
+ * @param {{ modern?: boolean }} [opts] modern: Luker has `pluginLanes`
  * @returns {object[]} Luker regex scripts, in run order ([] = nothing to do)
  */
-export function buildScripts(plan) {
+export function buildScripts(plan, { modern = true } = {}) {
     if (!plan || plan.enabled === false) return [];
     const black = parseTagList(plan.black);
     const white = parseTagList(plan.white);
     if (!black.length && !white.length) return [];
+    const scope = requestLaneScope(modern);
     const out = [];
     let n = 0;
+    const script = (...args) => makeScript(...args, scope);
     const names = (list, kind) => list.filter(t => t.kind === kind).map(t => esc(t.name)).join('|');
 
     const bAngle = names(black, 'angle');

@@ -2,15 +2,16 @@
 //
 // Keeps the 标签过滤 regex scripts registered with Luker's regex engine.
 // Started from index.js (works while the lens is closed). Scripts are
-// runtime-only: never written to the user's regex list, and scoped
-// pluginOnly + promptOnly so they only touch text plugins read.
+// runtime-only: never written to the user's regex list, and scoped to the
+// plugin request lane so they only touch text going into plugin requests
+// (not plugin replies, not the main prompt).
 //
 // Also reproduces what memory-graph really reads for one floor, so the
 // preview / AI 诊断 see the same text: whitespace collapsed (memory-graph's
 // normalizeText), then the plugin lane with the user's own regex rules,
 // then ours (runtime scripts always run last).
 
-import { buildScripts, applyScripts, compileFind, AI_OUTPUT } from './tag-filter.js';
+import { buildScripts, applyScripts, compileFind, requestLaneScope, AI_OUTPUT } from './tag-filter.js';
 
 const OWNER = 'memory-lens-tag-filter';
 const SETTINGS_KEY = 'memory_lens';
@@ -21,6 +22,9 @@ let registration = null;
 let scripts = [];
 let mirror = true;
 let override = null; // preview: scripts to serve instead of the saved ones
+
+/** Luker with separate plugin request / reply lanes. */
+const modernLanes = () => typeof engine?.getPluginLanes === 'function';
 
 const MIRROR_PREFIX = 'memory-lens-tagfilter-mirror-';
 
@@ -64,7 +68,7 @@ export async function startTagFilter(getCtx) {
     const sync = () => {
         try {
             const plan = activePlan(readFilterSettings(getCtx()));
-            scripts = buildScripts(plan);
+            scripts = buildScripts(plan, { modern: modernLanes() });
             mirror = plan.mirrorPrompt;
         } catch (err) { scripts = []; console.warn('[memory-lens] tag filter sync failed', err); }
         registration.refresh?.();
@@ -95,16 +99,26 @@ export function mirroredRules() {
         try { list = engine.getScriptsByType(type, { allowedOnly: true }) || []; } catch { list = []; }
         for (const s of list) {
             if (!isPromptRule(s)) continue;
-            out.push({ ...s, id: `${MIRROR_PREFIX}${s.id || out.length}`, scriptName: `记忆透镜 · 沿用 · ${String(s.scriptName || '').trim() || '未命名'}`, placement: [AI_OUTPUT], pluginOnly: true, promptOnly: true });
+            const { pluginOnly: _legacy, pluginLanes: _lanes, ...rest } = s;
+            out.push({ ...rest, id: `${MIRROR_PREFIX}${s.id || out.length}`, scriptName: `记忆透镜 · 沿用 · ${String(s.scriptName || '').trim() || '未命名'}`, placement: [AI_OUTPUT], ...requestLaneScope(modernLanes()) });
         }
     }
     return out;
 }
 
 export function isPromptRule(s) {
-    if (!s || s.disabled || !s.promptOnly || s.pluginOnly || s.markdownOnly) return false;
+    if (!s || s.disabled || !s.promptOnly || hasPluginScope(s) || s.markdownOnly) return false;
     if (!Array.isArray(s.placement) || !s.placement.includes(AI_OUTPUT)) return false;
     return !isWipeRule(s);
+}
+
+/** Any plugin lane at all (legacy `pluginOnly` or `pluginLanes`). */
+const hasPluginScope = (s) => Boolean(s?.pluginOnly) || (Array.isArray(s?.pluginLanes) && s.pluginLanes.length > 0);
+
+/** On the request lane, i.e. where memory-graph reads floors. */
+function onRequestLane(s) {
+    if (Array.isArray(s?.pluginLanes)) return s.pluginLanes.includes('request');
+    return Boolean(s?.pluginOnly) && (modernLanes() || Boolean(s?.promptOnly));
 }
 
 const PROBE = '雨停了。\nShe opened the door 123.';
@@ -116,7 +130,7 @@ export function isWipeRule(s) {
 }
 
 const isOurs = (s) => String(s?.id || '').startsWith('memory-lens-tagfilter') || s?.__runtime_owner === OWNER;
-const onPluginLane = (s) => s && !s.disabled && s.pluginOnly && s.promptOnly && Array.isArray(s.placement) && s.placement.includes(AI_OUTPUT);
+const onPluginLane = (s) => s && !s.disabled && onRequestLane(s) && Array.isArray(s.placement) && s.placement.includes(AI_OUTPUT);
 
 /**
  * Is the filter really registered, and which of the user's own rules also
@@ -160,7 +174,7 @@ export function previewFloor(ctx, index, plan) {
     const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
     const text = collapse(chat[index]?.mes);
     const apply = ctx?.regex?.applyRegex;
-    const planScripts = buildScripts({ ...plan, enabled: true });
+    const planScripts = buildScripts({ ...plan, enabled: true }, { modern: modernLanes() });
     if (typeof apply !== 'function' || !registration || !text) {
         return { before: text, after: planScripts.length ? applyScripts(text, planScripts) : text, real: false };
     }

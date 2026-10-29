@@ -55,14 +55,20 @@ test('whitelist on a bare reply deletes everything and is flagged', () => {
     assert.deepEqual(planWarnings({ black: 'think' }, bare), []);
 });
 
-test('scripts target only the plugin input lane', () => {
+test('scripts target only the plugin request lane', () => {
     const scripts = buildScripts({ black: 'think', white: 'content' });
     assert.ok(scripts.length > 2);
     for (const s of scripts) {
-        assert.equal(s.pluginOnly, true);
-        assert.equal(s.promptOnly, true);
+        assert.deepEqual(s.pluginLanes, ['request'], 'not the reply lane');
+        assert.equal(s.promptOnly, false, 'not the main prompt');
+        assert.equal('pluginOnly' in s, false);
         assert.deepEqual(s.placement, [2]);
         assert.ok(s.id.startsWith('memory-lens-tagfilter-'));
+    }
+    for (const s of buildScripts({ black: 'think' }, { modern: false })) {
+        assert.equal(s.pluginOnly, true, 'older Luker');
+        assert.equal(s.promptOnly, true);
+        assert.equal('pluginLanes' in s, false);
     }
     assert.deepEqual(buildScripts({ enabled: false, black: 'think' }), []);
     assert.deepEqual(buildScripts({ black: '', white: '' }), []);
@@ -115,6 +121,8 @@ test('which of the user\'s rules get mirrored onto the memory-graph lane', () =>
     assert.equal(isPromptRule({ ...base, findRegex: '/<think>[\\s\\S]*?<\\/think>/g', minDepth: 1 }), true, 'depth limits are kept');
     assert.equal(isPromptRule({ ...base, findRegex: '/[\\s\\S]*/g', minDepth: 5 }), false, 'hides old floors');
     assert.equal(isPromptRule({ ...base, pluginOnly: true }), false, 'already on the lane');
+    assert.equal(isPromptRule({ ...base, pluginLanes: ['request'] }), false, 'already on the request lane');
+    assert.equal(isPromptRule({ ...base, pluginLanes: [] }), true, 'no plugin lane');
     assert.equal(isPromptRule({ ...base, promptOnly: false }), false, 'edits the chat itself');
     assert.equal(isPromptRule({ ...base, disabled: true }), false);
     assert.equal(isPromptRule({ ...base, placement: [1] }), false, 'user input only');
