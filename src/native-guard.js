@@ -4,14 +4,18 @@
 // 安全停用并移除本扩展自身注入的 style.css，避免后加载覆盖内置 .mlens 样式且不卡死启动流程。
 
 const watchedLinks = new WeakSet();
+const ALLOWED_BASE_PROTOCOLS = new Set(['http:', 'https:', 'file:']);
 
 function resolveValidBaseUrl(doc) {
     const candidates = [doc?.baseURI, globalThis.location?.href, 'http://localhost/'];
     for (const candidate of candidates) {
         const raw = String(candidate || '').trim();
-        if (!raw || raw.toLowerCase().startsWith('about:')) continue;
+        if (!raw) continue;
         try {
-            return new URL(raw).href;
+            const parsed = new URL(raw);
+            if (!ALLOWED_BASE_PROTOCOLS.has(parsed.protocol)) continue;
+            new URL('.', parsed.href);
+            return parsed.href;
         } catch {
             // 尝试下一个候选基准地址
         }
@@ -39,12 +43,22 @@ function hasStylesheetPathSuffix(doc, suffix) {
     return false;
 }
 
-function isZhLocale(ctx) {
+function resolveLocaleKind(ctx) {
     try {
-        const locale = String(ctx?.getCurrentLocale?.() || globalThis.navigator?.language || '');
-        return !locale || locale.toLowerCase().startsWith('zh');
+        const raw = ctx?.getCurrentLocale?.() || globalThis.navigator?.language || '';
+        const locale = String(raw).trim().toLowerCase().replace(/_/g, '-');
+        if (!locale || !locale.startsWith('zh')) return 'en';
+        if (
+            locale === 'zh-tw' || locale.startsWith('zh-tw-')
+            || locale === 'zh-hk' || locale.startsWith('zh-hk-')
+            || locale === 'zh-mo' || locale.startsWith('zh-mo-')
+            || locale.includes('hant')
+        ) {
+            return 'zh-tw';
+        }
+        return 'zh-cn';
     } catch {
-        return true;
+        return 'en';
     }
 }
 
@@ -78,6 +92,11 @@ export function removeOwnStylesheets(doc, ownStyleHref, { forceRemove = false } 
         const rawHref = link.getAttribute?.('href') || link.href || '';
         if (normalizePathname(rawHref, doc) !== targetPath) continue;
         handled++;
+        if (!forceRemove && watchedLinks.has(link)) {
+            // 已在等待 load/error 且已设 media='not all' 阻断生效，
+            // 绝不因 WebKit 在子 @import 完成前暴露 link.sheet 而提前 remove()
+            continue;
+        }
         const alreadyLoaded = Boolean(link.sheet);
         if (forceRemove || alreadyLoaded || typeof link.addEventListener !== 'function') {
             link.disabled = true;
@@ -85,15 +104,13 @@ export function removeOwnStylesheets(doc, ownStyleHref, { forceRemove = false } 
             continue;
         }
         link.media = 'not all';
-        if (!watchedLinks.has(link)) {
-            watchedLinks.add(link);
-            const detach = () => {
-                link.disabled = true;
-                link.remove();
-            };
-            link.addEventListener('load', detach, { once: true });
-            link.addEventListener('error', detach, { once: true });
-        }
+        watchedLinks.add(link);
+        const detach = () => {
+            link.disabled = true;
+            link.remove();
+        };
+        link.addEventListener('load', detach, { once: true });
+        link.addEventListener('error', detach, { once: true });
     }
     return handled;
 }
@@ -119,25 +136,30 @@ export function retireIfNativeMemoryLens({
         observer = new globalThis.MutationObserver(() => cleanup());
         observer.observe(doc.head, { childList: true });
         globalThis.setTimeout?.(() => {
-            cleanup({ forceRemove: true });
             observer?.disconnect();
             observer = null;
         }, 15000);
     }
 
-    const zh = isZhLocale(ctx);
-    const title = zh ? '记忆透镜（旧插件已停用）' : 'Memory Lens (Legacy Plugin Disabled)';
-    const message = zh
-        ? 'Luker 已原生内置「记忆图工作区」，旧版第三方插件 memory-lens 已自动停用并移除旧样式。请在「管理扩展」中卸载此旧插件以避免冲突。'
-        : 'Memory Lens is now built into Luker. Legacy plugin memory-lens has disabled itself and removed its stylesheet. Please uninstall it from Manage Extensions.';
+    const localeKind = resolveLocaleKind(ctx);
+    const title = localeKind === 'zh-tw'
+        ? '記憶透鏡（舊擴充功能已停用）'
+        : localeKind === 'zh-cn'
+            ? '记忆透镜（旧插件已停用）'
+            : 'Memory Lens (Legacy Plugin Disabled)';
+    const message = localeKind === 'zh-tw'
+        ? 'Luker 已原生內建「記憶圖工作區」，舊版第三方擴充功能 memory-lens 已自動停用並移除舊樣式。請在「管理擴充功能」中移除此舊擴充功能以避免衝突。'
+        : localeKind === 'zh-cn'
+            ? 'Luker 已原生内置「记忆图工作区」，旧版第三方插件 memory-lens 已自动停用并移除旧样式。请在「管理扩展」中卸载此旧插件以避免冲突。'
+            : 'Memory Lens is now built into Luker. Legacy plugin memory-lens has disabled itself and removed its stylesheet. Please uninstall it from Manage Extensions.';
 
     console.warn(`[memory-lens] ${message}`);
 
     let notified = false;
-    const emitNotice = () => {
+    const emitNotice = (forceRemove = false) => {
         if (notified) return;
         notified = true;
-        cleanup({ forceRemove: true });
+        cleanup(forceRemove ? { forceRemove: true } : undefined);
         observer?.disconnect();
         observer = null;
         try { notify?.(message, title); } catch { /* ignore */ }
@@ -146,14 +168,14 @@ export function retireIfNativeMemoryLens({
     try {
         const ready = ctx?.eventTypes?.APP_READY;
         if (ready && typeof ctx.eventSource?.once === 'function') {
-            ctx.eventSource.once(ready, emitNotice);
+            ctx.eventSource.once(ready, () => emitNotice(true));
         } else if (ready && typeof ctx.eventSource?.on === 'function') {
-            ctx.eventSource.on(ready, emitNotice);
+            ctx.eventSource.on(ready, () => emitNotice(true));
         } else {
-            globalThis.setTimeout?.(emitNotice, 1500);
+            globalThis.setTimeout?.(() => emitNotice(false), 1500);
         }
     } catch {
-        globalThis.setTimeout?.(emitNotice, 1500);
+        globalThis.setTimeout?.(() => emitNotice(false), 1500);
     }
 
     return true;
