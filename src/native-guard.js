@@ -1,14 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // 原生记忆图退场守卫：当检测到 Luker 已内置原生记忆图工作区（PR #58 及之后版本）时，
-// 立即移除本扩展自身注入的 style.css 避免后加载覆盖内置 .mlens 样式，并停用旧插件并提示卸载。
+// 安全停用并移除本扩展自身注入的 style.css，避免后加载覆盖内置 .mlens 样式且不卡死启动流程。
+
+const watchedLinks = new WeakSet();
+
+function resolveValidBaseUrl(doc) {
+    const candidates = [doc?.baseURI, globalThis.location?.href, 'http://localhost/'];
+    for (const candidate of candidates) {
+        const raw = String(candidate || '').trim();
+        if (!raw || raw.toLowerCase().startsWith('about:')) continue;
+        try {
+            return new URL(raw).href;
+        } catch {
+            // 尝试下一个候选基准地址
+        }
+    }
+    return 'http://localhost/';
+}
 
 function normalizePathname(href, doc) {
     const raw = String(href || '').trim();
     if (!raw) return '';
     try {
-        const base = doc?.baseURI || globalThis.location?.href || 'http://localhost/';
-        return new URL(raw, base).pathname.toLowerCase();
+        return new URL(raw, resolveValidBaseUrl(doc)).pathname.toLowerCase();
     } catch {
         return raw.split(/[?#]/)[0].toLowerCase();
     }
@@ -48,28 +63,43 @@ export function isNativeMemoryLensPresent(
 }
 
 /**
- * 从文档 head 中移除与本插件样式路径匹配的 <link> 标签。
+ * 安全停用并移除本插件自身的样式 <link>，保证不中断 Luker addExtensionStyle 的 onload。
  * @param {Document | null | undefined} doc
  * @param {string} ownStyleHref
- * @returns {number} 移除的标签数量
+ * @param {{ forceRemove?: boolean }} [options]
+ * @returns {number} 命中的标签数量
  */
-export function removeOwnStylesheets(doc, ownStyleHref) {
+export function removeOwnStylesheets(doc, ownStyleHref, { forceRemove = false } = {}) {
     if (!doc?.head || !ownStyleHref) return 0;
     const targetPath = normalizePathname(ownStyleHref, doc);
     if (!targetPath) return 0;
-    let removed = 0;
+    let handled = 0;
     for (const link of doc.head.querySelectorAll('link[href]')) {
         const rawHref = link.getAttribute?.('href') || link.href || '';
-        if (normalizePathname(rawHref, doc) === targetPath) {
+        if (normalizePathname(rawHref, doc) !== targetPath) continue;
+        handled++;
+        const alreadyLoaded = Boolean(link.sheet);
+        if (forceRemove || alreadyLoaded || typeof link.addEventListener !== 'function') {
+            link.disabled = true;
             link.remove();
-            removed++;
+            continue;
+        }
+        link.media = 'not all';
+        if (!watchedLinks.has(link)) {
+            watchedLinks.add(link);
+            const detach = () => {
+                link.disabled = true;
+                link.remove();
+            };
+            link.addEventListener('load', detach, { once: true });
+            link.addEventListener('error', detach, { once: true });
         }
     }
-    return removed;
+    return handled;
 }
 
 /**
- * 若检测到 Luker 已内置原生记忆图工作区，则移除自身样式并安排一次性卸载提醒。
+ * 若检测到 Luker 已内置原生记忆图工作区，则安全停用自身样式并安排一次性卸载提醒。
  * @param {{ ownStyleHref: string, ctx?: object | null, doc?: Document | null, notify?: (msg: string, title: string) => void }} options
  * @returns {boolean} 是否已退场（true 表示跳过旧插件初始化）
  */
@@ -81,7 +111,7 @@ export function retireIfNativeMemoryLens({
 } = {}) {
     if (!isNativeMemoryLensPresent(ctx, doc)) return false;
 
-    const cleanup = () => removeOwnStylesheets(doc, ownStyleHref);
+    const cleanup = (opts) => removeOwnStylesheets(doc, ownStyleHref, opts);
     cleanup();
 
     let observer = null;
@@ -89,7 +119,7 @@ export function retireIfNativeMemoryLens({
         observer = new globalThis.MutationObserver(() => cleanup());
         observer.observe(doc.head, { childList: true });
         globalThis.setTimeout?.(() => {
-            cleanup();
+            cleanup({ forceRemove: true });
             observer?.disconnect();
             observer = null;
         }, 15000);
@@ -107,7 +137,7 @@ export function retireIfNativeMemoryLens({
     const emitNotice = () => {
         if (notified) return;
         notified = true;
-        cleanup();
+        cleanup({ forceRemove: true });
         observer?.disconnect();
         observer = null;
         try { notify?.(message, title); } catch { /* ignore */ }
